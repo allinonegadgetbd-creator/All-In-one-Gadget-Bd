@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import fs from 'fs';
+import http from 'http';
 import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
@@ -181,6 +182,7 @@ async function startServer() {
   await initStore();
 
   const app = express();
+  const httpServer = http.createServer(app);
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '2mb' }));
 
@@ -767,7 +769,12 @@ async function startServer() {
   if (!IS_PROD) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: true,
+        ws: { server: httpServer },
+        allowedHosts: true,
+      },
       appType: 'spa',
     });
 
@@ -832,7 +839,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`All In One Gadget server running on http://0.0.0.0:${PORT}`);
   });
 }

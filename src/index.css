@@ -45,6 +45,31 @@
     animation: none;
     transform: none;
   }
+  .animate-reviews-marquee-rtl {
+    animation: none;
+    transform: none;
+  }
+}
+
+/* Seamless infinite right-to-left marquee for customer reviews */
+@keyframes reviews-marquee-rtl {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.animate-reviews-marquee-rtl {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: reviews-marquee-rtl 42s linear infinite;
+}
+
+.animate-reviews-marquee-rtl:hover {
+  animation-play-state: paused;
 }
 
 /* Clean hidden scrollbar for horizontal category bar */
