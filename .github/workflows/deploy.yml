@@ -7,9 +7,18 @@ on:
       - master
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
-  build_and_deploy:
-    name: Verify, Build & Deploy
+  build:
+    name: Verify & Build
     runs-on: ubuntu-latest
 
     steps:
@@ -35,25 +44,34 @@ jobs:
       - name: Verify server entry syntax
         run: node --experimental-strip-types --check server.ts
 
-      - name: Build production bundle
+      - name: Setup GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build production bundle for GitHub Pages
         run: npm run build
         env:
           NODE_ENV: production
+          VITE_STATIC_MODE: 'true'
+          VITE_BASE_PATH: '${{ steps.pages.outputs.base_path }}/'
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY || secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_CLOUDINARY_CLOUD_NAME: ${{ vars.VITE_CLOUDINARY_CLOUD_NAME || secrets.VITE_CLOUDINARY_CLOUD_NAME }}
+          VITE_CLOUDINARY_UPLOAD_PRESET: ${{ vars.VITE_CLOUDINARY_UPLOAD_PRESET || secrets.VITE_CLOUDINARY_UPLOAD_PRESET }}
 
-      - name: Upload production build artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: all-in-one-gadget-dist
-          path: |
-            dist/
-            server.ts
-            server/
-            public/
-            package.json
-          retention-days: 14
+          path: dist
 
-      - name: Trigger Auto-Deploy Webhook (Render / Railway / Custom Host)
-        if: ${{ secrets.DEPLOY_WEBHOOK_URL != '' }}
-        env:
-          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
-        run: curl -fsSL -X POST "$DEPLOY_WEBHOOK_URL"
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

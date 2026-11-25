@@ -8,6 +8,8 @@ import { ReviewsSection } from '../components/storefront/ReviewsSection';
 import { TrackOrderModal } from '../components/storefront/TrackOrderModal';
 import { PromoPopupModal } from '../components/storefront/PromoPopupModal';
 import { Footer } from '../components/storefront/Footer';
+import { storeClient } from '../utils/storeClient';
+import { assetUrl, routeUrl } from '../utils/assetUrl';
 import type { CartItem, Product, ProductVariation, StorefrontData } from '../types';
 
 interface StorefrontPageProps {
@@ -34,8 +36,8 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
   const [trackOpen, setTrackOpen] = useState(false);
 
   useEffect(() => {
-    fetch('/api/storefront')
-      .then((res) => res.json())
+    storeClient
+      .getStorefront()
       .then((json: StorefrontData) => {
         setData(json);
       })
@@ -83,8 +85,8 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
             '@type': 'Product',
             name: prod.name,
             description: prod.description,
-            url: `${window.location.origin}/product/${prod.slug}`,
-            image: window.location.origin + prod.image,
+            url: `${window.location.origin}${routeUrl(`/product/${prod.slug}`)}`,
+            image: window.location.origin + assetUrl(prod.image),
             offers: {
               '@type': 'Offer',
               priceCurrency: 'BDT',
@@ -112,7 +114,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-3">
         <img
-          src="/assets/logo-header.png"
+          src={assetUrl('/assets/logo-header.png')}
           alt="All In One Gadget"
           className="h-12 w-auto object-contain"
         />

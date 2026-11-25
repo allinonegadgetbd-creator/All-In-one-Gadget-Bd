@@ -14,6 +14,8 @@ import {
   X,
 } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { storeClient } from '../utils/storeClient';
+import { assetUrl } from '../utils/assetUrl';
 import { AdminOrdersTab } from '../components/admin/AdminOrdersTab';
 import { AdminCatalogTab } from '../components/admin/AdminCatalogTab';
 import { AdminOffersTab } from '../components/admin/AdminOffersTab';
@@ -88,27 +90,25 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    fetch('/api/admin/auth/status')
-      .then((r) => r.json())
+    storeClient
+      .getAuthStatus()
       .then((res) => {
         setAuthMode(res.authMode === 'supabase' ? 'supabase' : 'passcode');
         setNeedsSetup(Boolean(res.needsSetup));
+        if (res.existingToken) {
+          setToken(res.existingToken);
+        }
       })
       .finally(() => setCheckingAuth(false));
   }, []);
 
   const fetchBootstrap = useCallback(async (authToken: string) => {
-    const res = await fetch('/api/admin/bootstrap', {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-    if (res.status === 401) {
+    const json = await storeClient.getAdminBootstrap(authToken);
+    if (!json) {
       setToken('');
       return;
     }
-    if (res.ok) {
-      const json = (await res.json()) as AdminBootstrap;
-      setData(json);
-    }
+    setData(json);
   }, []);
 
   const triggerOrderNotification = useCallback(async (order: Order) => {
@@ -119,52 +119,44 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
       const title = `New Order ${order.orderNumber} (৳${order.total.toLocaleString()})`;
       const body = `${order.customerName} · ${order.customerPhone} · ${order.items.length} item(s)`;
+      const iconUrl = assetUrl('/pwa-192x192.png');
       try {
         if ('serviceWorker' in navigator) {
           const reg = await navigator.serviceWorker.ready;
           await reg.showNotification(title, {
             body,
-            icon: '/pwa-192x192.png',
-            badge: '/pwa-192x192.png',
-            data: { url: '/admin' },
+            icon: iconUrl,
+            badge: iconUrl,
+            data: { url: assetUrl('/admin') },
           });
           return;
         }
       } catch {
         // Fallback to direct Notification constructor
       }
-      new Notification(title, { body, icon: '/pwa-192x192.png' });
+      new Notification(title, { body, icon: iconUrl });
     }
   }, []);
 
-  // Live SSE Stream for incoming orders
+  // Live SSE / Supabase Realtime Stream for incoming orders
   useEffect(() => {
     if (!token) return;
     fetchBootstrap(token);
 
-    const es = new EventSource(`/api/admin/orders/stream?token=${encodeURIComponent(token)}`);
-    eventSourceRef.current = es;
-
-    es.addEventListener('new_order', (event) => {
-      try {
-        const order = JSON.parse((event as MessageEvent).data) as Order;
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                orders: [order, ...prev.orders.filter((o) => o.id !== order.id)],
-              }
-            : prev
-        );
-        triggerOrderNotification(order);
-      } catch {
-        // ignore parse error
-      }
+    const unsubscribe = storeClient.subscribeAdminOrders(token, (order) => {
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              orders: [order, ...prev.orders.filter((o) => o.id !== order.id)],
+            }
+          : prev
+      );
+      triggerOrderNotification(order);
     });
 
     return () => {
-      es.close();
-      eventSourceRef.current = null;
+      unsubscribe();
     };
   }, [token, fetchBootstrap, triggerOrderNotification]);
 
@@ -174,35 +166,20 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
     setAuthSubmitting(true);
 
     try {
-      if (authMode === 'supabase') {
-        const res = await fetch('/api/admin/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          setAuthError(json.error || 'Invalid email or password.');
-        } else {
-          setPassword('');
-          setToken(json.token);
-        }
-        return;
-      }
-
-      const endpoint = needsSetup ? '/api/admin/auth/setup' : '/api/admin/auth/login';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passcode }),
+      const result = await storeClient.loginAdmin({
+        mode: authMode,
+        needsSetup,
+        email,
+        password,
+        passcode,
       });
-      const json = await res.json();
-      if (!res.ok) {
-        setAuthError(json.error || 'Authentication failed.');
+      if (!result.ok || !result.token) {
+        setAuthError(result.error || 'Authentication failed.');
       } else {
         setNeedsSetup(false);
+        setPassword('');
         setPasscode('');
-        setToken(json.token);
+        setToken(result.token);
       }
     } catch {
       setAuthError('Network error. Please try again.');
@@ -225,39 +202,30 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
     playNotificationChime();
     const title = 'All In One Gadget Admin';
     const body = 'Order alerts are active! New orders will notify you immediately.';
+    const iconUrl = assetUrl('/pwa-192x192.png');
     if ('serviceWorker' in navigator) {
       try {
         const reg = await navigator.serviceWorker.ready;
         await reg.showNotification(title, {
           body,
-          icon: '/pwa-192x192.png',
-          data: { url: '/admin' },
+          icon: iconUrl,
+          data: { url: assetUrl('/admin') },
         });
         return;
       } catch {
         // fallback
       }
     }
-    new Notification(title, { body, icon: '/pwa-192x192.png' });
+    new Notification(title, { body, icon: iconUrl });
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus) => {
-    await fetch(`/api/admin/orders/${orderId}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ status }),
-    });
+    await storeClient.updateOrderStatus(token, orderId, status);
     await fetchBootstrap(token);
   };
 
   const handleDeleteOrder = async (orderId: string) => {
-    await fetch(`/api/admin/orders/${orderId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    await storeClient.deleteOrder(token, orderId);
     await fetchBootstrap(token);
   };
 
@@ -276,7 +244,7 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
         <div className="w-full max-w-sm bg-white rounded-3xl border border-slate-200 shadow-xl p-6 sm:p-7 space-y-5">
           <div className="flex flex-col items-center text-center">
             <img
-              src="/assets/aistudio/Glossy_Blue_Shopping_Bag_Icon_8e9d9e96.png"
+              src={assetUrl('/assets/aistudio/Glossy_Blue_Shopping_Bag_Icon_8e9d9e96.png')}
               alt="All In One Gadget Admin"
               className="w-16 h-16 object-contain"
             />
@@ -425,7 +393,7 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
         <div className="space-y-6">
           <div className="flex items-center gap-3 px-2 pt-2">
             <img
-              src="/assets/aistudio/Glossy_Blue_Shopping_Bag_Icon_8e9d9e96.png"
+              src={assetUrl('/assets/aistudio/Glossy_Blue_Shopping_Bag_Icon_8e9d9e96.png')}
               alt="AIOG"
               className="w-9 h-9 rounded-xl bg-white p-1"
             />
@@ -474,7 +442,10 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
           </button>
           <button
             type="button"
-            onClick={() => setToken('')}
+            onClick={() => {
+              storeClient.logoutAdmin();
+              setToken('');
+            }}
             className="w-full h-10 px-3 rounded-xl text-xs font-medium text-slate-300 hover:bg-white/10 flex items-center gap-2 cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
@@ -489,7 +460,7 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
         <header className="sticky top-0 z-30 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <img
-              src="/assets/aistudio/Glossy_Blue_Shopping_Bag_Icon_8e9d9e96.png"
+              src={assetUrl('/assets/aistudio/Glossy_Blue_Shopping_Bag_Icon_8e9d9e96.png')}
               alt="Admin"
               className="w-8 h-8 rounded-lg lg:hidden"
             />

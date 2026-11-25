@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, ArrowRight } from 'lucide-react';
+import { assetUrl } from '../../utils/assetUrl';
 import type { PopupConfig, PopupThemeKey } from '../../types';
 
 interface PromoPopupModalProps {
@@ -91,7 +92,7 @@ export const PromoPopupModal: React.FC<PromoPopupModalProps> = ({ popup }) => {
             className="block bg-white"
           >
             <img
-              src={popup.bannerImage}
+              src={assetUrl(popup.bannerImage)}
               alt={popup.title || 'Special Offer'}
               referrerPolicy="no-referrer"
               className="w-full h-auto max-h-[80vh] object-contain"

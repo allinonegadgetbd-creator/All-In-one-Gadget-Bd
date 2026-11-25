@@ -39,7 +39,32 @@ export async function initStore(): Promise<StoreDatabase> {
       if (!error) {
         supabaseAvailable = true;
         if (data?.payload) {
-          dbCache = data.payload as StoreDatabase;
+          const loaded = data.payload as StoreDatabase;
+          const { data: orderRows } = await sb
+            .from('orders')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (Array.isArray(orderRows) && orderRows.length > 0) {
+            loaded.orders = orderRows.map((r: any) => ({
+              id: r.id,
+              orderNumber: r.order_number,
+              customerName: r.customer_name,
+              customerPhone: r.customer_phone,
+              customerAddress: r.customer_address,
+              deliveryZone: r.delivery_zone,
+              items: r.items || [],
+              subtotal: r.subtotal,
+              tierDiscount: r.tier_discount || 0,
+              couponCode: r.coupon_code || undefined,
+              couponDiscount: r.coupon_discount || 0,
+              deliveryCharge: r.delivery_charge || 0,
+              total: r.total,
+              status: r.status,
+              notes: r.notes || undefined,
+              createdAt: r.created_at,
+            }));
+          }
+          dbCache = loaded;
           return dbCache;
         }
       }
@@ -114,9 +139,14 @@ export async function persistStore(nextDb: StoreDatabase): Promise<void> {
   const sb = getSupabase();
   if (sb) {
     try {
+      const publicPayload: StoreDatabase = {
+        ...nextDb,
+        orders: [],
+        adminCredential: null,
+      };
       const { error } = await sb.from('store_state').upsert({
         id: 'default',
-        payload: nextDb,
+        payload: publicPayload,
         updated_at: new Date().toISOString(),
       });
       if (!error) supabaseAvailable = true;

@@ -13,6 +13,8 @@ import {
 import type { CartItem, Order, SiteSettings } from '../../types';
 import { buildWhatsAppOrderUrl } from '../../utils/whatsapp';
 import { trackMetaEvent } from '../../utils/metaPixel';
+import { storeClient } from '../../utils/storeClient';
+import { assetUrl } from '../../utils/assetUrl';
 
 interface CheckoutDrawerProps {
   open: boolean;
@@ -106,13 +108,8 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
     if (!code) return;
     setCouponStatus(null);
     try {
-      const res = await fetch('/api/coupons/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, subtotal }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.valid) {
+      const data = await storeClient.validateCoupon(code, subtotal);
+      if (!data.ok || !data.valid || !data.coupon) {
         setAppliedCoupon(null);
         setCouponStatus({ ok: false, msg: data.message || 'Invalid coupon' });
       } else {
@@ -137,28 +134,23 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
     });
 
     try {
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerName,
-          customerPhone,
-          customerAddress,
-          deliveryZone,
-          couponCode: appliedCoupon?.code,
-          notes,
-          items: items.map((item) => ({
-            productId: item.product.id,
-            quantity: item.quantity,
-            variationId: item.variation?.id,
-            variationLabel: item.variation
-              ? [item.variation.color, item.variation.size].filter(Boolean).join(' / ')
-              : undefined,
-          })),
-        }),
+      const data = await storeClient.createOrder({
+        customerName,
+        customerPhone,
+        customerAddress,
+        deliveryZone,
+        couponCode: appliedCoupon?.code,
+        notes,
+        items: items.map((item) => ({
+          productId: item.product.id,
+          quantity: item.quantity,
+          variationId: item.variation?.id,
+          variationLabel: item.variation
+            ? [item.variation.color, item.variation.size].filter(Boolean).join(' / ')
+            : undefined,
+        })),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (!data.ok || !data.order) {
         setErrorMsg(data.error || 'Could not place order. Please check your details.');
       } else {
         setConfirmedOrder(data.order);
@@ -166,7 +158,7 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
         trackMetaEvent('Purchase', {
           value: data.order.total,
           currency: 'BDT',
-          content_ids: data.order.items.map((i: { productId: string }) => i.productId),
+          content_ids: data.order.items.map((i) => i.productId),
         });
       }
     } catch {
@@ -307,7 +299,7 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
                       className="flex gap-3 p-3 rounded-xl border border-slate-200/80 bg-white"
                     >
                       <img
-                        src={item.product.image}
+                        src={assetUrl(item.product.image)}
                         alt={item.product.name}
                         referrerPolicy="no-referrer"
                         className="w-16 h-16 rounded-lg bg-[#F8FAFC] object-contain p-1 shrink-0"

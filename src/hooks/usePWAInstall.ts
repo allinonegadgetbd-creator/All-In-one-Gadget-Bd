@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { assetUrl, getBasePath } from '../utils/assetUrl';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -26,13 +27,14 @@ export function usePWAInstall(enabled: boolean) {
     if (!manifestLink) {
       manifestLink = document.createElement('link');
       manifestLink.rel = 'manifest';
-      manifestLink.href = '/admin-manifest.webmanifest';
+      manifestLink.href = assetUrl('/admin-manifest.webmanifest');
       document.head.appendChild(manifestLink);
     }
 
     // Register Service Worker only on /admin
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+      const base = getBasePath();
+      navigator.serviceWorker.register(assetUrl('/sw.js'), { scope: base }).catch(() => {
         // Non-fatal if preview restricts SW scope
       });
     }

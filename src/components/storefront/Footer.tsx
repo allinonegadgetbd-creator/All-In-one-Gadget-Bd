@@ -1,5 +1,6 @@
 import React from 'react';
 import { Phone, Mail, MessageCircle, Facebook, Instagram, Youtube } from 'lucide-react';
+import { assetUrl } from '../../utils/assetUrl';
 import type { SiteSettings } from '../../types';
 
 interface FooterProps {
@@ -23,7 +24,7 @@ export const Footer: React.FC<FooterProps> = ({ settings }) => {
           {/* Brand Column */}
           <div>
             <img
-              src="/assets/logo-header.png"
+              src={assetUrl('/assets/logo-header.png')}
               alt={settings.brandName}
               className="h-10 w-auto object-contain"
               referrerPolicy="no-referrer"

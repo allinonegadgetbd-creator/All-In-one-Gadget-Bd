@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { assetUrl } from '../../utils/assetUrl';
 import type { HeroBanner } from '../../types';
 
 interface HeroBannerSliderProps {
@@ -30,7 +31,7 @@ export const HeroBannerSlider: React.FC<HeroBannerSliderProps> = ({ banners }) =
           {banners.map((banner, idx) => (
             <img
               key={banner.id}
-              src={banner.image}
+              src={assetUrl(banner.image)}
               alt={banner.alt || `All In One Gadget Banner ${idx + 1}`}
               referrerPolicy="no-referrer"
               className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${

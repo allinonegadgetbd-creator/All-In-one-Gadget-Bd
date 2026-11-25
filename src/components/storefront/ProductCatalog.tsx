@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Search, ShoppingBag, Package, Zap } from 'lucide-react';
+import { assetUrl, routeUrl } from '../../utils/assetUrl';
 import type { Category, Product, ProductVariation } from '../../types';
 
 interface ProductCatalogProps {
@@ -168,7 +169,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                     </div>
                   ) : (
                     <img
-                      src={product.image}
+                      src={assetUrl(product.image)}
                       alt={product.name}
                       loading="lazy"
                       referrerPolicy="no-referrer"
@@ -191,7 +192,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                   </div>
 
                   <a
-                    href={`/product/${product.slug}`}
+                    href={routeUrl(`/product/${product.slug}`)}
                     onClick={(e) => {
                       e.preventDefault();
                       onSelectProduct(product);

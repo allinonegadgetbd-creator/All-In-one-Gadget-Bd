@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, Tag, Percent } from 'lucide-react';
+import { storeClient } from '../../utils/storeClient';
 import type { Coupon, DiscountTier, SiteSettings } from '../../types';
 
 interface AdminOffersTabProps {
@@ -27,53 +28,29 @@ export const AdminOffersTab: React.FC<AdminOffersTabProps> = ({
   const handleAddCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim()) return;
-    await fetch('/api/admin/coupons', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        code: code.trim().toUpperCase(),
-        type,
-        value: Number(value) || 0,
-        minSpend: Number(minSpend) || 0,
-        active: true,
-      }),
+    await storeClient.addCoupon(token, {
+      code: code.trim().toUpperCase(),
+      type,
+      value: Number(value) || 0,
+      minSpend: Number(minSpend) || 0,
+      active: true,
     });
     setCode('');
     await onRefresh();
   };
 
   const handleToggleCoupon = async (coupon: Coupon) => {
-    await fetch(`/api/admin/coupons/${coupon.id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ active: !coupon.active }),
-    });
+    await storeClient.toggleCoupon(token, coupon);
     await onRefresh();
   };
 
   const handleDeleteCoupon = async (id: string) => {
-    await fetch(`/api/admin/coupons/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    await storeClient.deleteCoupon(token, id);
     await onRefresh();
   };
 
   const saveTiers = async (tiers: DiscountTier[]) => {
-    await fetch('/api/admin/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ discountTiers: tiers }),
-    });
+    await storeClient.saveSettings(token, { discountTiers: tiers });
     await onRefresh();
   };
 

@@ -3,11 +3,12 @@ import { StorefrontPage } from './pages/StorefrontPage';
 import { ProductLandingPage } from './pages/ProductLandingPage';
 import { AdminApp } from './pages/AdminApp';
 import { trackMetaEvent } from './utils/metaPixel';
+import { routeUrl, stripBase } from './utils/assetUrl';
 import type { CartItem, Product, ProductVariation } from './types';
 
 export default function App() {
   const [pathname, setPathname] = useState<string>(() =>
-    typeof window !== 'undefined' ? window.location.pathname : '/'
+    typeof window !== 'undefined' ? stripBase(window.location.pathname) : '/'
   );
 
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -20,7 +21,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    const onPop = () => setPathname(window.location.pathname);
+    const onPop = () => setPathname(stripBase(window.location.pathname));
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -34,9 +35,11 @@ export default function App() {
   }, [cart]);
 
   const navigate = (to: string) => {
-    if (window.location.pathname !== to) {
-      window.history.pushState({}, '', to);
-      setPathname(to);
+    const normalized = to.startsWith('/') ? to : `/${to}`;
+    const fullUrl = routeUrl(normalized);
+    if (window.location.pathname !== fullUrl) {
+      window.history.pushState({}, '', fullUrl);
+      setPathname(stripBase(fullUrl));
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };

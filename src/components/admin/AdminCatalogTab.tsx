@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Pencil, Trash2, Upload, X, FolderPlus, Info, Link2, Check } from 'lucide-react';
+import { storeClient } from '../../utils/storeClient';
+import { assetUrl, routeUrl } from '../../utils/assetUrl';
 import type { Category, Product, ProductVariation } from '../../types';
 
 interface AdminCatalogTabProps {
@@ -74,15 +76,8 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
   const handleImageUpload = async (file: File) => {
     setUploading(true);
     try {
-      const form = new FormData();
-      form.append('file', file);
-      const res = await fetch('/api/admin/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (data.url) setImage(data.url);
+      const url = await storeClient.uploadImage(token, file);
+      if (url) setImage(url);
     } finally {
       setUploading(false);
     }
@@ -105,17 +100,7 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
         active,
         variations,
       };
-      const url = isNewProduct
-        ? '/api/admin/products'
-        : `/api/admin/products/${editingProduct?.id}`;
-      await fetch(url, {
-        method: isNewProduct ? 'POST' : 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      await storeClient.saveProduct(token, isNewProduct, editingProduct?.id, payload);
       setEditingProduct(null);
       await onRefresh();
     } finally {
@@ -124,10 +109,7 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
   };
 
   const handleDeleteProduct = async (id: string) => {
-    await fetch(`/api/admin/products/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    await storeClient.deleteProduct(token, id);
     await onRefresh();
   };
 
@@ -147,23 +129,13 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
   const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
-    await fetch('/api/admin/categories', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ name: newCategoryName.trim() }),
-    });
+    await storeClient.addCategory(token, newCategoryName.trim());
     setNewCategoryName('');
     await onRefresh();
   };
 
   const handleDeleteCategory = async (id: string) => {
-    await fetch(`/api/admin/categories/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    await storeClient.deleteCategory(token, id);
     await onRefresh();
   };
 
@@ -224,7 +196,7 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
                 className="bg-white rounded-2xl border border-slate-200 p-3 flex items-center gap-3"
               >
                 <img
-                  src={prod.image}
+                  src={assetUrl(prod.image)}
                   alt={prod.name}
                   className="w-14 h-14 rounded-xl bg-slate-50 object-contain p-1 shrink-0"
                 />
@@ -241,7 +213,7 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const url = `${window.location.origin}/product/${prod.slug}`;
+                      const url = `${window.location.origin}${routeUrl(`/product/${prod.slug}`)}`;
                       navigator.clipboard.writeText(url).then(() => {
                         setCopiedId(prod.id);
                         setTimeout(() => setCopiedId(null), 1500);
@@ -347,7 +319,7 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
                 <div className="flex items-center gap-3">
                   <img
-                    src={image}
+                    src={assetUrl(image)}
                     alt="Preview"
                     className="w-16 h-16 rounded-xl bg-white border border-slate-200 object-contain p-1 shrink-0"
                   />

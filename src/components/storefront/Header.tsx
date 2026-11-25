@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ShoppingBag, Menu, X } from 'lucide-react';
+import { assetUrl, routeUrl } from '../../utils/assetUrl';
 
 interface HeaderProps {
   cartCount: number;
@@ -28,13 +29,13 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-6 sm:gap-8">
         {/* Zone 1: Prominent Trimmed Brand Logo */}
         <a
-          href="/"
+          href={routeUrl('/')}
           onClick={handleLogoClick}
           className="flex items-center shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded-md"
           aria-label="All In One Gadget Home"
         >
           <img
-            src="/assets/logo-header.png"
+            src={assetUrl('/assets/logo-header.png')}
             alt="All In One Gadget"
             className="h-10 sm:h-12 w-auto object-contain"
             referrerPolicy="no-referrer"
@@ -44,19 +45,19 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Zone 2: Clean Single-Line Nav Links */}
         <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600">
           <a
-            href="/#products"
+            href={routeUrl('/#products')}
             className="hover:text-[#0066FF] transition-colors whitespace-nowrap shrink-0"
           >
             Products
           </a>
           <a
-            href="/#categories"
+            href={routeUrl('/#categories')}
             className="hover:text-[#0066FF] transition-colors whitespace-nowrap shrink-0"
           >
             Categories
           </a>
           <a
-            href="/#reviews"
+            href={routeUrl('/#reviews')}
             className="hover:text-[#0066FF] transition-colors whitespace-nowrap shrink-0"
           >
             Reviews
@@ -100,21 +101,21 @@ export const Header: React.FC<HeaderProps> = ({
       {mobileMenuOpen && (
         <div className="md:hidden border-t border-slate-100 bg-white px-4 py-3 flex flex-col gap-1">
           <a
-            href="/#products"
+            href={routeUrl('/#products')}
             onClick={() => setMobileMenuOpen(false)}
             className="px-3 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Products
           </a>
           <a
-            href="/#categories"
+            href={routeUrl('/#categories')}
             onClick={() => setMobileMenuOpen(false)}
             className="px-3 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Categories
           </a>
           <a
-            href="/#reviews"
+            href={routeUrl('/#reviews')}
             onClick={() => setMobileMenuOpen(false)}
             className="px-3 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
           >

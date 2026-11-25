@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Search, PackageCheck } from 'lucide-react';
+import { storeClient } from '../../utils/storeClient';
 import type { OrderItem, OrderStatus } from '../../types';
 
 interface TrackOrderModalProps {
@@ -31,14 +32,11 @@ export const TrackOrderModal: React.FC<TrackOrderModalProps> = ({ open, onClose 
     setResult(null);
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/orders/track/${encodeURIComponent(orderNumber.trim())}?phone=${encodeURIComponent(phone.trim())}`
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Order not found.');
+      const res = await storeClient.trackOrder(orderNumber, phone);
+      if (!res.ok || !res.data) {
+        setError(res.error || 'Order not found.');
       } else {
-        setResult(data);
+        setResult(res.data);
       }
     } catch {
       setError('Unable to check order status right now.');

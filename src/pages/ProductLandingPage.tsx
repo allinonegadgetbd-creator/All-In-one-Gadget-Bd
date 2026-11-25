@@ -19,6 +19,8 @@ import { CheckoutDrawer } from '../components/storefront/CheckoutDrawer';
 import { TrackOrderModal } from '../components/storefront/TrackOrderModal';
 import { trackMetaEvent } from '../utils/metaPixel';
 import { buildWhatsAppOrderUrl } from '../utils/whatsapp';
+import { storeClient } from '../utils/storeClient';
+import { assetUrl, routeUrl } from '../utils/assetUrl';
 import type { CartItem, Order, Product, ProductVariation, SiteSettings } from '../types';
 
 interface ProductLandingPageProps {
@@ -76,16 +78,13 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
     setQty(1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
-    fetch(`/api/products/${encodeURIComponent(slug)}`)
-      .then((res) => {
-        if (!res.ok) {
-          setNotFound(true);
-          return null;
-        }
-        return res.json();
-      })
+    storeClient
+      .getProductBySlug(slug)
       .then((data) => {
-        if (!data) return;
+        if (!data) {
+          setNotFound(true);
+          return;
+        }
         setProduct(data.product);
         setRelated(data.related || []);
         setSettings(data.settings);
@@ -113,7 +112,8 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
       canonical.rel = 'canonical';
       document.head.appendChild(canonical);
     }
-    canonical.href = `${window.location.origin}/product/${product.slug}`;
+    const canonicalHref = `${window.location.origin}${routeUrl(`/product/${product.slug}`)}`;
+    canonical.href = canonicalHref;
 
     const ldId = 'aiog-product-jsonld';
     let script = document.getElementById(ldId) as HTMLScriptElement | null;
@@ -123,18 +123,19 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
       script.type = 'application/ld+json';
       document.head.appendChild(script);
     }
+    const imgAbs = product.image.startsWith('http')
+      ? product.image
+      : `${window.location.origin}${assetUrl(product.image)}`;
     script.textContent = JSON.stringify({
       '@context': 'https://schema.org',
       '@type': 'Product',
       name: product.name,
-      image: product.image.startsWith('http')
-        ? product.image
-        : `${window.location.origin}${product.image}`,
+      image: imgAbs,
       description: product.description,
       category: product.categoryName,
       offers: {
         '@type': 'Offer',
-        url: `${window.location.origin}/product/${product.slug}`,
+        url: canonicalHref,
         priceCurrency: 'BDT',
         price: product.price,
         availability:
@@ -188,13 +189,8 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
     const code = couponInput.trim().toUpperCase();
     if (!code) return;
     setCouponMsg(null);
-    const res = await fetch('/api/coupons/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, subtotal }),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.valid) {
+    const json = await storeClient.validateCoupon(code, subtotal);
+    if (!json.ok || !json.valid || !json.coupon) {
       setAppliedCoupon(null);
       setCouponMsg({ ok: false, text: json.message || 'Invalid coupon' });
     } else {
@@ -217,29 +213,24 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
     });
 
     try {
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerName,
-          customerPhone,
-          customerAddress,
-          deliveryZone,
-          couponCode: appliedCoupon?.code,
-          items: [
-            {
-              productId: product.id,
-              quantity: qty,
-              variationId: selectedVariation?.id,
-              variationLabel: selectedVariation
-                ? [selectedVariation.color, selectedVariation.size].filter(Boolean).join(' / ')
-                : undefined,
-            },
-          ],
-        }),
+      const json = await storeClient.createOrder({
+        customerName,
+        customerPhone,
+        customerAddress,
+        deliveryZone,
+        couponCode: appliedCoupon?.code,
+        items: [
+          {
+            productId: product.id,
+            quantity: qty,
+            variationId: selectedVariation?.id,
+            variationLabel: selectedVariation
+              ? [selectedVariation.color, selectedVariation.size].filter(Boolean).join(' / ')
+              : undefined,
+          },
+        ],
       });
-      const json = await res.json();
-      if (!res.ok) {
+      if (!json.ok || !json.order) {
         setOrderError(json.error || 'Could not place order.');
       } else {
         setConfirmedOrder(json.order);
@@ -339,7 +330,7 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
           <div className="lg:col-span-6 space-y-5">
             <div className="bg-[#F8FAFC] border border-slate-200/80 rounded-2xl p-6 sm:p-10 aspect-square flex items-center justify-center">
               <img
-                src={product.image}
+                src={assetUrl(product.image)}
                 alt={product.name}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-contain max-h-[460px]"
@@ -630,7 +621,7 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
                 >
                   <div className="aspect-square bg-[#F8FAFC] rounded-xl p-2 flex items-center justify-center">
                     <img
-                      src={item.image}
+                      src={assetUrl(item.image)}
                       alt={item.name}
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-contain"

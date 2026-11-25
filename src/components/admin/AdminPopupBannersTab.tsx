@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, Trash2, Plus, Info, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { storeClient } from '../../utils/storeClient';
+import { assetUrl } from '../../utils/assetUrl';
 import type { HeroBanner, PopupConfig, PopupThemeKey } from '../../types';
 
 interface AdminPopupBannersTabProps {
@@ -33,15 +35,7 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
   const uploadFile = async (file: File): Promise<string | null> => {
     setUploading(true);
     try {
-      const form = new FormData();
-      form.append('file', file);
-      const res = await fetch('/api/admin/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json();
-      return data.url || null;
+      return await storeClient.uploadImage(token, file);
     } finally {
       setUploading(false);
     }
@@ -52,14 +46,7 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
     setSavingPopup(true);
     setSavedMsg('');
     try {
-      await fetch('/api/admin/popup', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(popup),
-      });
+      await storeClient.savePopup(token, popup);
       await onRefresh();
       setSavedMsg('Popup settings saved!');
     } finally {
@@ -71,14 +58,7 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
     setBanners(nextBanners);
     setSavingBanners(true);
     try {
-      await fetch('/api/admin/banners', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ banners: nextBanners }),
-      });
+      await storeClient.saveBanners(token, nextBanners);
       await onRefresh();
     } finally {
       setSavingBanners(false);
@@ -138,7 +118,7 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
 
             {popup.bannerImage && (
               <img
-                src={popup.bannerImage}
+                src={assetUrl(popup.bannerImage)}
                 alt="Popup Banner"
                 className="w-full max-h-48 object-contain rounded-xl border border-slate-200 bg-slate-50"
               />
@@ -310,7 +290,7 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
           {banners.map((b) => (
             <div key={b.id} className="rounded-xl border border-slate-200 overflow-hidden">
               <img
-                src={b.image}
+                src={assetUrl(b.image)}
                 alt={b.alt}
                 className="w-full aspect-video object-cover bg-slate-100"
               />

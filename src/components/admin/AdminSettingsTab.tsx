@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Save, Bell, Download, CheckCircle2 } from 'lucide-react';
+import { storeClient } from '../../utils/storeClient';
 import type { SiteSettings } from '../../types';
 
 interface AdminSettingsTabProps {
@@ -36,14 +37,7 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
     setSaving(true);
     setSaved(false);
     try {
-      await fetch('/api/admin/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(form),
-      });
+      await storeClient.saveSettings(token, form);
       await onRefresh();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
