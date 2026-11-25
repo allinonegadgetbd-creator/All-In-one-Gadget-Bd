@@ -16,11 +16,17 @@ import { TopMarqueeBar } from '../components/storefront/TopMarqueeBar';
 import { Header } from '../components/storefront/Header';
 import { Footer } from '../components/storefront/Footer';
 import { CheckoutDrawer } from '../components/storefront/CheckoutDrawer';
-import { TrackOrderModal } from '../components/storefront/TrackOrderModal';
 import { trackMetaEvent } from '../utils/metaPixel';
 import { buildWhatsAppOrderUrl } from '../utils/whatsapp';
 import { storeClient } from '../utils/storeClient';
 import { assetUrl, routeUrl } from '../utils/assetUrl';
+import {
+  BD_DIVISIONS,
+  divisionToZone,
+  normalizePhoneInput,
+  sanitizeCustomerNameInput,
+  validateOrderFields,
+} from '../utils/orderValidation';
 import type { CartItem, Order, Product, ProductVariation, SiteSettings } from '../types';
 
 interface ProductLandingPageProps {
@@ -52,12 +58,12 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
   const [qty, setQty] = useState(1);
   const [copiedLink, setCopiedLink] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
-  const [trackOpen, setTrackOpen] = useState(false);
   const [addedFeedback, setAddedFeedback] = useState(false);
 
   // Direct 1-Page Cash on Delivery Checkout Form for Facebook Ad Landing Conversion
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [division, setDivision] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [deliveryZone, setDeliveryZone] = useState<'inside_dhaka' | 'outside_dhaka'>('inside_dhaka');
   const [couponInput, setCouponInput] = useState('');
@@ -199,10 +205,31 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
     }
   };
 
+  const handleDivisionChange = (nextDivision: string) => {
+    setDivision(nextDivision);
+    if (nextDivision) {
+      setDeliveryZone(divisionToZone(nextDivision));
+    }
+  };
+
   const handleDirectOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!product) return;
     setOrderError('');
+
+    const validated = validateOrderFields({
+      customerName,
+      customerPhone,
+      customerAddress,
+      division,
+      requireDivision: true,
+    });
+    if (!validated.ok) {
+      setOrderError(validated.error || 'Please check your order details.');
+      return;
+    }
+
+    const effectiveZone = divisionToZone(validated.cleanDivision || division);
     setSubmitting(true);
 
     trackMetaEvent('InitiateCheckout', {
@@ -214,10 +241,11 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
 
     try {
       const json = await storeClient.createOrder({
-        customerName,
-        customerPhone,
-        customerAddress,
-        deliveryZone,
+        customerName: validated.cleanName,
+        customerPhone: validated.cleanPhone,
+        customerAddress: validated.cleanAddress,
+        division: validated.cleanDivision,
+        deliveryZone: effectiveZone,
         couponCode: appliedCoupon?.code,
         items: [
           {
@@ -292,7 +320,6 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
       <Header
         cartCount={bagCount}
         onOpenCart={() => setCartOpen(true)}
-        onOpenTrackOrder={() => setTrackOpen(true)}
         onNavigateHome={() => onNavigate('/')}
       />
 
@@ -482,19 +509,37 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
                       type="text"
                       required
                       value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      placeholder="Your Full Name *"
+                      onChange={(e) => setCustomerName(sanitizeCustomerNameInput(e.target.value))}
+                      placeholder="Your Full Name * (Letters only)"
                       className="h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-[#0066FF]"
                     />
                     <input
                       type="tel"
+                      inputMode="numeric"
                       required
+                      minLength={11}
+                      maxLength={11}
+                      pattern="01[3-9][0-9]{8}"
                       value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                      placeholder="Mobile Number (01XXXXXXXXX) *"
+                      onChange={(e) => setCustomerPhone(normalizePhoneInput(e.target.value))}
+                      placeholder="017XXXXXXXX (11 digits) *"
                       className="h-11 px-3.5 rounded-xl border border-slate-200 text-sm font-mono focus:outline-none focus:border-[#0066FF]"
                     />
                   </div>
+
+                  <select
+                    required
+                    value={division}
+                    onChange={(e) => handleDivisionChange(e.target.value)}
+                    className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:border-[#0066FF]"
+                  >
+                    <option value="">Select your Division *</option>
+                    {BD_DIVISIONS.map((div) => (
+                      <option key={div} value={div}>
+                        {div} {div === 'Dhaka' ? '(Inside Dhaka)' : '(Outside Dhaka)'}
+                      </option>
+                    ))}
+                  </select>
 
                   <textarea
                     required
@@ -505,30 +550,15 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-[#0066FF]"
                   />
 
-                  {settings.deliveryChargeEnabled && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryZone('inside_dhaka')}
-                        className={`h-10 rounded-xl border text-xs font-semibold cursor-pointer ${
-                          deliveryZone === 'inside_dhaka'
-                            ? 'border-[#0066FF] bg-blue-50 text-[#05163B]'
-                            : 'border-slate-200 text-slate-700'
-                        }`}
-                      >
-                        Inside Dhaka (৳{settings.insideDhakaFee})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryZone('outside_dhaka')}
-                        className={`h-10 rounded-xl border text-xs font-semibold cursor-pointer ${
-                          deliveryZone === 'outside_dhaka'
-                            ? 'border-[#0066FF] bg-blue-50 text-[#05163B]'
-                            : 'border-slate-200 text-slate-700'
-                        }`}
-                      >
-                        Outside Dhaka (৳{settings.outsideDhakaFee})
-                      </button>
+                  {settings.deliveryChargeEnabled && division && (
+                    <div className="px-3.5 py-2 rounded-xl border border-blue-200 bg-blue-50/70 text-xs font-semibold text-[#05163B] flex items-center justify-between">
+                      <span>
+                        Auto Delivery Zone:{' '}
+                        {deliveryZone === 'inside_dhaka' ? 'Inside Dhaka' : 'Outside Dhaka'}
+                      </span>
+                      <span className="font-mono">
+                        {deliveryCharge === 0 ? 'Free' : `৳${deliveryCharge}`}
+                      </span>
                     </div>
                   )}
 
@@ -651,8 +681,6 @@ export const ProductLandingPage: React.FC<ProductLandingPageProps> = ({
         onRemoveItem={onRemoveItem}
         onClearCart={onClearCart}
       />
-
-      <TrackOrderModal open={trackOpen} onClose={() => setTrackOpen(false)} />
     </div>
   );
 };

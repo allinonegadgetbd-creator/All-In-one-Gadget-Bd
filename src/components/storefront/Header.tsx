@@ -5,14 +5,12 @@ import { assetUrl, routeUrl } from '../../utils/assetUrl';
 interface HeaderProps {
   cartCount: number;
   onOpenCart: () => void;
-  onOpenTrackOrder: () => void;
   onNavigateHome?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   cartCount,
   onOpenCart,
-  onOpenTrackOrder,
   onNavigateHome,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -62,13 +60,6 @@ export const Header: React.FC<HeaderProps> = ({
           >
             Reviews
           </a>
-          <button
-            type="button"
-            onClick={onOpenTrackOrder}
-            className="hover:text-[#0066FF] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            Track Order
-          </button>
         </nav>
 
         {/* Zone 3: Single Primary Action (Shopping Bag) + Mobile Drawer Toggle */}
@@ -121,16 +112,6 @@ export const Header: React.FC<HeaderProps> = ({
           >
             Reviews
           </a>
-          <button
-            type="button"
-            onClick={() => {
-              setMobileMenuOpen(false);
-              onOpenTrackOrder();
-            }}
-            className="text-left px-3 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Track Order
-          </button>
         </div>
       )}
     </header>

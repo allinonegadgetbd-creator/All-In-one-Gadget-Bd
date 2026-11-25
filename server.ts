@@ -207,7 +207,7 @@ async function startServer() {
   // SEO Routes (Sitemap & Robots)
   // =========================
   app.get('/robots.txt', (req, res) => {
-    const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+    const baseUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
     res.type('text/plain').send(
       `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/admin\n\nSitemap: ${baseUrl}/sitemap.xml\n`
     );
@@ -304,9 +304,19 @@ async function startServer() {
   app.post('/api/orders', async (req, res) => {
     const db = getStoreSync();
     const customerName = String(req.body?.customerName || '').trim();
-    const customerPhone = String(req.body?.customerPhone || '').trim();
+    const rawPhone = String(req.body?.customerPhone || '').replace(/[০-৯]/g, (d) =>
+      String('০১২৩৪৫৬৭৮৯'.indexOf(d))
+    );
+    const customerPhone = rawPhone.replace(/\D/g, '').slice(0, 11);
     const customerAddress = String(req.body?.customerAddress || '').trim();
-    const deliveryZone = req.body?.deliveryZone === 'outside_dhaka' ? 'outside_dhaka' : 'inside_dhaka';
+    const division = typeof req.body?.division === 'string' ? req.body.division.trim() : undefined;
+    const deliveryZone = division
+      ? division === 'Dhaka'
+        ? 'inside_dhaka'
+        : 'outside_dhaka'
+      : req.body?.deliveryZone === 'outside_dhaka'
+        ? 'outside_dhaka'
+        : 'inside_dhaka';
     const couponCode = typeof req.body?.couponCode === 'string' ? req.body.couponCode.trim() : undefined;
     const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 300) : undefined;
     const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -315,8 +325,14 @@ async function startServer() {
       res.status(400).json({ error: 'Please enter your full name.' });
       return;
     }
-    if (!customerPhone || customerPhone.replace(/\D/g, '').length < 10) {
-      res.status(400).json({ error: 'Please enter a valid mobile number.' });
+    if (/[0-9০-৯]/.test(customerName)) {
+      res.status(400).json({ error: 'Numbers are not allowed in the Name field.' });
+      return;
+    }
+    if (!/^01[3-9]\d{8}$/.test(customerPhone) || /(.)\1{7}/.test(customerPhone)) {
+      res.status(400).json({
+        error: 'Mobile number must be 11 digits starting with 01 (e.g. 017XXXXXXXX).',
+      });
       return;
     }
     if (!customerAddress || customerAddress.length < 5) {
@@ -341,6 +357,7 @@ async function startServer() {
       customerName,
       customerPhone,
       customerAddress,
+      division,
       deliveryZone,
       items: calc.items,
       subtotal: calc.subtotal,
@@ -360,33 +377,6 @@ async function startServer() {
     broadcastOrderEvent(order);
 
     res.status(201).json({ order });
-  });
-
-  app.get('/api/orders/track/:orderNumber', (req, res) => {
-    const db = getStoreSync();
-    const orderNum = String(req.params.orderNumber || '').trim().toUpperCase();
-    const phone = String(req.query.phone || '').replace(/\D/g, '');
-    const order = db.orders.find((o) => o.orderNumber.toUpperCase() === orderNum);
-
-    if (!order) {
-      res.status(404).json({ error: 'Order not found. Check your Order ID.' });
-      return;
-    }
-
-    if (phone.length < 4 || !order.customerPhone.replace(/\D/g, '').endsWith(phone.slice(-4))) {
-      res.status(403).json({ error: 'Phone number does not match this order.' });
-      return;
-    }
-
-    res.json({
-      orderNumber: order.orderNumber,
-      status: order.status,
-      customerName: order.customerName,
-      deliveryZone: order.deliveryZone,
-      items: order.items,
-      total: order.total,
-      createdAt: order.createdAt,
-    });
   });
 
   // =========================

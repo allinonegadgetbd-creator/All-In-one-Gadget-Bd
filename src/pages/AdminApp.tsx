@@ -80,6 +80,7 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
   const [data, setData] = useState<AdminBootstrap | null>(null);
   const [liveToast, setLiveToast] = useState<string>('');
   const [actionError, setActionError] = useState<string>('');
+  const [dbWarning, setDbWarning] = useState<string>('');
   const [showIOSGuide, setShowIOSGuide] = useState(false);
 
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() =>
@@ -143,6 +144,13 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
   useEffect(() => {
     if (!token) return;
     fetchBootstrap(token);
+    storeClient.checkDatabaseHealth().then((health) => {
+      if (!health.ok && health.issue) {
+        setDbWarning(health.issue);
+      } else {
+        setDbWarning('');
+      }
+    });
 
     const unsubscribe = storeClient.subscribeAdminOrders(token, (order) => {
       setData((prev) =>
@@ -533,6 +541,15 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
           </div>
         )}
 
+        {dbWarning && (
+          <div className="mx-4 mt-3 p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-medium flex items-start justify-between gap-2">
+            <span>{dbWarning}</span>
+            <button type="button" onClick={() => setDbWarning('')} className="p-1 shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Scrollable App Body */}
         <main className="flex-1 p-4 pb-24 lg:pb-8 max-w-4xl w-full mx-auto">
           {!data ? (
@@ -569,7 +586,6 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
                 <AdminPopupBannersTab
                   token={token}
                   popup={data.popup}
-                  banners={data.banners}
                   onRefresh={() => fetchBootstrap(token)}
                 />
               )}

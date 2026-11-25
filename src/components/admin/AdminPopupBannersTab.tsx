@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
-import { Upload, Trash2, Plus, Info, Sparkles, Image as ImageIcon } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Upload, Info, Sparkles } from 'lucide-react';
 import { storeClient } from '../../utils/storeClient';
 import { assetUrl } from '../../utils/assetUrl';
-import type { HeroBanner, PopupConfig, PopupThemeKey } from '../../types';
+import type { PopupConfig, PopupThemeKey } from '../../types';
 
 interface AdminPopupBannersTabProps {
   token: string;
   popup: PopupConfig;
-  banners: HeroBanner[];
   onRefresh: () => Promise<void>;
 }
 
@@ -22,21 +21,26 @@ const THEME_LABELS: Array<{ id: PopupThemeKey; label: string; swatch: string }> 
 export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
   token,
   popup: initialPopup,
-  banners: initialBanners,
   onRefresh,
 }) => {
   const [popup, setPopup] = useState<PopupConfig>(initialPopup);
-  const [banners, setBanners] = useState<HeroBanner[]>(initialBanners);
   const [savingPopup, setSavingPopup] = useState(false);
-  const [savingBanners, setSavingBanners] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
   const [saveError, setSaveError] = useState('');
 
+  useEffect(() => {
+    setPopup(initialPopup);
+  }, [initialPopup]);
+
   const uploadFile = async (file: File): Promise<string | null> => {
     setUploading(true);
+    setSaveError('');
     try {
       return await storeClient.uploadImage(token, file);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Image upload failed.');
+      return null;
     } finally {
       setUploading(false);
     }
@@ -47,28 +51,21 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
     setSavingPopup(true);
     setSavedMsg('');
     setSaveError('');
+
+    if (popup.enabled && popup.mode === 'banner' && !popup.bannerImage.trim()) {
+      setSaveError('Please upload or paste a popup banner image before enabling Banner Popup.');
+      setSavingPopup(false);
+      return;
+    }
+
     try {
       await storeClient.savePopup(token, popup);
       await onRefresh();
-      setSavedMsg('Popup settings saved!');
+      setSavedMsg('Popup saved! It will appear once when visitors open or refresh the site.');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save popup.');
     } finally {
       setSavingPopup(false);
-    }
-  };
-
-  const handleSaveBanners = async (nextBanners: HeroBanner[]) => {
-    setBanners(nextBanners);
-    setSavingBanners(true);
-    setSaveError('');
-    try {
-      await storeClient.saveBanners(token, nextBanners);
-      await onRefresh();
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to update banners.');
-    } finally {
-      setSavingBanners(false);
     }
   };
 
@@ -79,6 +76,7 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
           {saveError}
         </div>
       )}
+
       {/* Website Entry Popup Config */}
       <form onSubmit={handleSavePopup} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
         <div className="flex items-center justify-between">
@@ -257,89 +255,6 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
 
         {savedMsg && <p className="text-xs font-semibold text-emerald-600">{savedMsg}</p>}
       </form>
-
-      {/* 16:9 Hero Banners Manager */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ImageIcon className="w-4 h-4 text-[#0066FF]" />
-            <h3 className="text-sm font-bold text-[#05163B]">Hero 16:9 Banners</h3>
-          </div>
-          <label className="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-xl bg-[#05163B] text-white text-xs font-semibold cursor-pointer">
-            <Plus className="w-3.5 h-3.5" />
-            Upload 16:9
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const url = await uploadFile(file);
-                if (url) {
-                  const next = [
-                    ...banners,
-                    {
-                      id: `bn-${Date.now()}`,
-                      image: url,
-                      alt: 'All In One Gadget Banner',
-                      active: true,
-                      order: banners.length + 1,
-                    },
-                  ];
-                  await handleSaveBanners(next);
-                }
-              }}
-            />
-          </label>
-        </div>
-
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600">
-          Recommended Hero Banner Size: <strong>1920 × 1080 px (16:9 Ratio)</strong>. Banners display full-bleed without overlay buttons or text.
-        </div>
-
-        <div className="space-y-3">
-          {banners.map((b) => (
-            <div key={b.id} className="rounded-xl border border-slate-200 overflow-hidden">
-              <img
-                src={assetUrl(b.image)}
-                alt={b.alt}
-                className="w-full aspect-video object-cover bg-slate-100"
-              />
-              <div className="p-2.5 flex items-center justify-between gap-2 bg-slate-50">
-                <span className="text-xs text-slate-600 truncate">{b.alt}</span>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    disabled={savingBanners}
-                    onClick={() =>
-                      handleSaveBanners(
-                        banners.map((item) =>
-                          item.id === b.id ? { ...item, active: !item.active } : item
-                        )
-                      )
-                    }
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
-                      b.active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
-                    }`}
-                  >
-                    {b.active ? 'Active' : 'Hidden'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSaveBanners(banners.filter((item) => item.id !== b.id))
-                    }
-                    className="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 };

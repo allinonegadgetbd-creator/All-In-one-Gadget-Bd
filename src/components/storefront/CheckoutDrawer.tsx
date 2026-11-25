@@ -15,6 +15,13 @@ import { buildWhatsAppOrderUrl } from '../../utils/whatsapp';
 import { trackMetaEvent } from '../../utils/metaPixel';
 import { storeClient } from '../../utils/storeClient';
 import { assetUrl } from '../../utils/assetUrl';
+import {
+  BD_DIVISIONS,
+  divisionToZone,
+  normalizePhoneInput,
+  sanitizeCustomerNameInput,
+  validateOrderFields,
+} from '../../utils/orderValidation';
 
 interface CheckoutDrawerProps {
   open: boolean;
@@ -37,6 +44,7 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
 }) => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [division, setDivision] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [deliveryZone, setDeliveryZone] = useState<'inside_dhaka' | 'outside_dhaka'>('inside_dhaka');
   const [notes, setNotes] = useState('');
@@ -121,11 +129,31 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
     }
   };
 
+  const handleDivisionChange = (nextDivision: string) => {
+    setDivision(nextDivision);
+    if (nextDivision) {
+      setDeliveryZone(divisionToZone(nextDivision));
+    }
+  };
+
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     if (items.length === 0) return;
 
+    const validated = validateOrderFields({
+      customerName,
+      customerPhone,
+      customerAddress,
+      division,
+      requireDivision: true,
+    });
+    if (!validated.ok) {
+      setErrorMsg(validated.error || 'Please check your order details.');
+      return;
+    }
+
+    const effectiveZone = divisionToZone(validated.cleanDivision || division);
     setSubmitting(true);
     trackMetaEvent('InitiateCheckout', {
       value: total,
@@ -135,10 +163,11 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
 
     try {
       const data = await storeClient.createOrder({
-        customerName,
-        customerPhone,
-        customerAddress,
-        deliveryZone,
+        customerName: validated.cleanName,
+        customerPhone: validated.cleanPhone,
+        customerAddress: validated.cleanAddress,
+        division: validated.cleanDivision,
+        deliveryZone: effectiveZone,
         couponCode: appliedCoupon?.code,
         notes,
         items: items.map((item) => ({
@@ -387,27 +416,48 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
                 <div className="text-sm font-bold text-[#05163B]">Delivery Details</div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Full Name *</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Full Name * (Letters only)</label>
                   <input
                     type="text"
                     required
                     value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
+                    onChange={(e) => setCustomerName(sanitizeCustomerNameInput(e.target.value))}
                     placeholder="e.g. Tanvir Ahmed"
                     className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-[#0066FF]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Mobile Number *</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Mobile Number * (11 digits, starts with 01)</label>
                   <input
                     type="tel"
+                    inputMode="numeric"
                     required
+                    minLength={11}
+                    maxLength={11}
+                    pattern="01[3-9][0-9]{8}"
                     value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="01XXXXXXXXX"
+                    onChange={(e) => setCustomerPhone(normalizePhoneInput(e.target.value))}
+                    placeholder="017XXXXXXXX"
                     className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm font-mono focus:outline-none focus:border-[#0066FF]"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Division *</label>
+                  <select
+                    required
+                    value={division}
+                    onChange={(e) => handleDivisionChange(e.target.value)}
+                    className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:border-[#0066FF]"
+                  >
+                    <option value="">Select your Division</option>
+                    {BD_DIVISIONS.map((div) => (
+                      <option key={div} value={div}>
+                        {div} {div === 'Dhaka' ? '(Inside Dhaka)' : '(Outside Dhaka)'}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -422,33 +472,15 @@ export const CheckoutDrawer: React.FC<CheckoutDrawerProps> = ({
                   />
                 </div>
 
-                {settings.deliveryChargeEnabled && (
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1.5">Delivery Area</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryZone('inside_dhaka')}
-                        className={`h-11 px-3 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
-                          deliveryZone === 'inside_dhaka'
-                            ? 'border-[#0066FF] bg-blue-50 text-[#05163B]'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        }`}
-                      >
-                        Inside Dhaka (৳{settings.insideDhakaFee})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryZone('outside_dhaka')}
-                        className={`h-11 px-3 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
-                          deliveryZone === 'outside_dhaka'
-                            ? 'border-[#0066FF] bg-blue-50 text-[#05163B]'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        }`}
-                      >
-                        Outside Dhaka (৳{settings.outsideDhakaFee})
-                      </button>
-                    </div>
+                {settings.deliveryChargeEnabled && division && (
+                  <div className="px-3.5 py-2.5 rounded-xl border border-blue-200 bg-blue-50/70 text-xs font-semibold text-[#05163B] flex items-center justify-between">
+                    <span>
+                      Auto Delivery Zone:{' '}
+                      {deliveryZone === 'inside_dhaka' ? 'Inside Dhaka' : 'Outside Dhaka'}
+                    </span>
+                    <span className="font-mono">
+                      {deliveryCharge === 0 ? 'Free' : `৳${deliveryCharge}`}
+                    </span>
                   </div>
                 )}
 

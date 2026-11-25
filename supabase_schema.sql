@@ -1,5 +1,5 @@
 -- Run this SQL once in your Supabase SQL Editor (Project: nrwelgnjmkomdginctex)
--- Creates persistent tables, strict RLS policies, and safe order tracking RPC
+-- Creates/upgrades persistent tables, grants table privileges, enforces strict RLS policies, and enables realtime alerts
 
 create table if not exists public.store_state (
   id text primary key default 'default',
@@ -13,6 +13,7 @@ create table if not exists public.orders (
   customer_name text not null,
   customer_phone text not null,
   customer_address text not null,
+  division text,
   delivery_zone text not null,
   items jsonb not null,
   subtotal integer not null,
@@ -26,8 +27,17 @@ create table if not exists public.orders (
   created_at timestamptz not null default now()
 );
 
+alter table public.orders add column if not exists division text;
+
 create index if not exists idx_orders_created_at on public.orders (created_at desc);
 create index if not exists idx_orders_order_number on public.orders (order_number);
+
+-- Required Postgres role grants so anon & authenticated API requests pass permission checks before RLS runs
+grant usage on schema public to anon, authenticated;
+grant select on public.store_state to anon, authenticated;
+grant insert, update, delete on public.store_state to authenticated;
+grant insert on public.orders to anon, authenticated;
+grant select, update, delete on public.orders to authenticated;
 
 -- Enable Row Level Security
 alter table public.store_state enable row level security;
@@ -47,7 +57,8 @@ create policy "Admin write store_state"
   using (true)
   with check (id = 'default');
 
--- Customers can only submit validated Pending orders; only authenticated admins can read/update/delete orders
+-- Customers can only submit validated Pending orders (no numbers in name, valid 11-digit 01 phone);
+-- only authenticated admins can read/update/delete orders
 drop policy if exists "Public insert orders" on public.orders;
 create policy "Public insert orders"
   on public.orders for insert
@@ -57,7 +68,8 @@ create policy "Public insert orders"
     and subtotal >= 0
     and total >= 0
     and length(trim(customer_name)) >= 2
-    and length(trim(customer_phone)) >= 10
+    and customer_name !~ '[0-9]'
+    and trim(customer_phone) ~ '^01[3-9][0-9]{8}$'
     and length(trim(customer_address)) >= 5
   );
 
@@ -68,36 +80,6 @@ create policy "Admin manage orders"
   using (true)
   with check (true);
 
--- Safe public order tracking RPC (matches exact order_number + last 4 phone digits only)
-create or replace function public.track_order_public(p_order_number text, p_phone_last4 text)
-returns table (
-  order_number text,
-  status text,
-  customer_name text,
-  items jsonb,
-  total integer,
-  created_at timestamptz
-)
-language sql
-security definer
-set search_path = public
-as $$
-  select
-    o.order_number,
-    o.status,
-    o.customer_name,
-    o.items,
-    o.total,
-    o.created_at
-  from public.orders o
-  where upper(o.order_number) = upper(trim(p_order_number))
-    and length(regexp_replace(p_phone_last4, '\D', '', 'g')) >= 4
-    and right(regexp_replace(o.customer_phone, '\D', '', 'g'), 4) = right(regexp_replace(p_phone_last4, '\D', '', 'g'), 4)
-  limit 1;
-$$;
-
-grant execute on function public.track_order_public(text, text) to anon, authenticated;
-
 -- Enable live order notifications in Supabase Realtime safely
 do $$
 begin
@@ -106,4 +88,3 @@ exception
   when duplicate_object then null;
   when undefined_object then null;
 end $$;
-

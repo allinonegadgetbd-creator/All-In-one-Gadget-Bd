@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { assetUrl } from './assetUrl';
+import { divisionToZone, validateOrderFields } from './orderValidation';
 import type {
   Category,
   Coupon,
@@ -191,6 +192,11 @@ async function saveStaticStore(next: StorePayload): Promise<void> {
       updated_at: new Date().toISOString(),
     });
     if (error) {
+      if (error.code === '42501' || /permission denied/i.test(error.message || '')) {
+        throw new Error(
+          'Supabase database permissions missing. Please run the updated supabase_schema.sql in Supabase SQL Editor once.'
+        );
+      }
       throw new Error(error.message || 'Could not save to database.');
     }
   }
@@ -373,40 +379,59 @@ export const storeClient = {
     customerName: string;
     customerPhone: string;
     customerAddress: string;
+    division?: string;
     deliveryZone: 'inside_dhaka' | 'outside_dhaka';
     couponCode?: string;
     notes?: string;
     items: Array<{ productId: string; quantity: number; variationId?: string; variationLabel?: string }>;
   }): Promise<{ ok: boolean; order?: Order; error?: string }> {
+    const validated = validateOrderFields({
+      customerName: payload.customerName,
+      customerPhone: payload.customerPhone,
+      customerAddress: payload.customerAddress,
+      division: payload.division,
+      requireDivision: true,
+    });
+    if (!validated.ok) {
+      return { ok: false, error: validated.error };
+    }
+
+    const effectiveZone = validated.cleanDivision
+      ? divisionToZone(validated.cleanDivision)
+      : payload.deliveryZone;
+
+    const cleanPayload = {
+      ...payload,
+      customerName: validated.cleanName,
+      customerPhone: validated.cleanPhone,
+      customerAddress: validated.cleanAddress,
+      division: validated.cleanDivision,
+      deliveryZone: effectiveZone,
+    };
+
     if (await isBackendAvailable()) {
       const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(cleanPayload),
       });
       const json = await res.json();
       return { ok: res.ok, order: json.order, error: json.error };
     }
 
-    const name = payload.customerName.trim();
-    const phone = payload.customerPhone.trim();
-    const addr = payload.customerAddress.trim();
-    if (name.length < 2) return { ok: false, error: 'Please enter your full name.' };
-    if (phone.replace(/\D/g, '').length < 10) return { ok: false, error: 'Please enter a valid mobile number.' };
-    if (addr.length < 5) return { ok: false, error: 'Please enter your delivery address.' };
-
     const db = await loadStaticStore();
-    const calc = computeOrderTotals(db, payload.items, payload.deliveryZone, payload.couponCode);
+    const calc = computeOrderTotals(db, payload.items, effectiveZone, payload.couponCode);
     if (calc.items.length === 0) return { ok: false, error: 'Your cart is empty.' };
 
     const uniqueSeq = `${Date.now().toString().slice(-5)}${Math.floor(Math.random() * 10)}`;
     const order: Order = {
       id: `ord-${crypto.randomUUID().slice(0, 8)}`,
       orderNumber: `AIOG-${uniqueSeq}`,
-      customerName: name,
-      customerPhone: phone,
-      customerAddress: addr,
-      deliveryZone: payload.deliveryZone,
+      customerName: validated.cleanName,
+      customerPhone: validated.cleanPhone,
+      customerAddress: validated.cleanAddress,
+      division: validated.cleanDivision,
+      deliveryZone: effectiveZone,
       items: calc.items,
       subtotal: calc.subtotal,
       tierDiscount: calc.tierDiscount,
@@ -427,6 +452,7 @@ export const storeClient = {
         customer_name: order.customerName,
         customer_phone: order.customerPhone,
         customer_address: order.customerAddress,
+        division: order.division || null,
         delivery_zone: order.deliveryZone,
         items: order.items,
         subtotal: order.subtotal,
@@ -439,8 +465,17 @@ export const storeClient = {
         notes: order.notes || null,
         created_at: order.createdAt,
       });
-      if (error && error.code === '42501') {
-        return { ok: false, error: 'Please check your name, mobile number, and address.' };
+      if (error) {
+        if (/permission denied/i.test(error.message || '')) {
+          return {
+            ok: false,
+            error: 'Order service is initializing (database permission required). Please run supabase_schema.sql or order via WhatsApp below.',
+          };
+        }
+        return {
+          ok: false,
+          error: error.message || 'Could not submit order. Please verify your details.',
+        };
       }
     }
 
@@ -454,65 +489,34 @@ export const storeClient = {
     return { ok: true, order };
   },
 
-  async trackOrder(orderNumber: string, phone: string): Promise<{ ok: boolean; data?: any; error?: string }> {
-    if (await isBackendAvailable()) {
-      const res = await fetch(
-        `/api/orders/track/${encodeURIComponent(orderNumber.trim())}?phone=${encodeURIComponent(phone.trim())}`
-      );
-      const data = await res.json();
-      return { ok: res.ok, data: res.ok ? data : undefined, error: data.error };
-    }
-
-    const cleanNum = orderNumber.trim().toUpperCase();
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length < 4) return { ok: false, error: 'Enter at least the last 4 digits of your phone.' };
-
+  async checkDatabaseHealth(): Promise<{ ok: boolean; issue?: string }> {
     const sb = getBrowserSupabase();
-    if (sb) {
-      try {
-        const { data } = await sb.rpc('track_order_public', {
-          p_order_number: cleanNum,
-          p_phone_last4: digits.slice(-4),
-        });
-        const row = Array.isArray(data) ? data[0] : data;
-        if (row) {
-          return {
-            ok: true,
-            data: {
-              orderNumber: row.order_number,
-              status: row.status,
-              customerName: row.customer_name,
-              items: row.items,
-              total: row.total,
-              createdAt: row.created_at,
-            },
-          };
-        }
-      } catch {
-        // fallback below
+    if (!sb) return { ok: true };
+    try {
+      const { error: stateErr } = await sb
+        .from('store_state')
+        .select('id')
+        .eq('id', 'default')
+        .limit(1);
+      if (stateErr && (stateErr.code === '42501' || /permission denied/i.test(stateErr.message || ''))) {
+        return {
+          ok: false,
+          issue:
+            'Supabase table permissions (GRANT) are not enabled yet. Copy & run the updated supabase_schema.sql in your Supabase SQL Editor once so Admin edits & Customer orders save properly.',
+        };
       }
+      const { error: ordErr } = await sb.from('orders').select('id').limit(1);
+      if (ordErr && (ordErr.code === '42501' || /permission denied/i.test(ordErr.message || ''))) {
+        return {
+          ok: false,
+          issue:
+            'Supabase orders table permissions are missing. Run the updated supabase_schema.sql in your Supabase SQL Editor once.',
+        };
+      }
+    } catch {
+      // ignore network blips
     }
-
-    const db = await loadStaticStore();
-    const localOrders: Order[] = JSON.parse(localStorage.getItem(LOCAL_ORDERS_KEY) || '[]');
-    const all = [...localOrders, ...(db.orders || [])];
-    const found = all.find(
-      (o) =>
-        o.orderNumber.toUpperCase() === cleanNum &&
-        o.customerPhone.replace(/\D/g, '').endsWith(digits.slice(-4))
-    );
-    if (!found) return { ok: false, error: 'Order not found or phone does not match.' };
-    return {
-      ok: true,
-      data: {
-        orderNumber: found.orderNumber,
-        status: found.status,
-        customerName: found.customerName,
-        items: found.items,
-        total: found.total,
-        createdAt: found.createdAt,
-      },
-    };
+    return { ok: true };
   },
 
   async getAuthStatus(): Promise<{
@@ -619,6 +623,7 @@ export const storeClient = {
           customerName: r.customer_name,
           customerPhone: r.customer_phone,
           customerAddress: r.customer_address,
+          division: r.division || undefined,
           deliveryZone: r.delivery_zone,
           items: r.items || [],
           subtotal: r.subtotal,
@@ -647,8 +652,10 @@ export const storeClient = {
 
   subscribeAdminOrders(token: string, onNewOrder: (order: Order) => void): () => void {
     let cleanup = () => {};
+    let disposed = false;
 
     isBackendAvailable().then((hasBackend) => {
+      if (disposed) return;
       if (hasBackend) {
         const es = new EventSource(`/api/admin/orders/stream?token=${encodeURIComponent(token)}`);
         es.addEventListener('new_order', (event) => {
@@ -676,6 +683,7 @@ export const storeClient = {
                 customerName: r.customer_name,
                 customerPhone: r.customer_phone,
                 customerAddress: r.customer_address,
+                division: r.division || undefined,
                 deliveryZone: r.delivery_zone,
                 items: r.items || [],
                 subtotal: r.subtotal,
@@ -697,7 +705,10 @@ export const storeClient = {
       }
     });
 
-    return () => cleanup();
+    return () => {
+      disposed = true;
+      cleanup();
+    };
   },
 
   async updateOrderStatus(token: string, orderId: string, status: OrderStatus): Promise<void> {

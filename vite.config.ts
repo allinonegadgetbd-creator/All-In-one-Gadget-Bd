@@ -120,6 +120,39 @@ export default defineConfig(() => {
                 // ignore malformed manifest
               }
             }
+            // 4. Copy CNAME & generate static sitemap.xml + robots.txt for GitHub Pages custom domain SEO
+            const cnameSrc = path.resolve(rootDir, 'CNAME');
+            let customDomain = 'www.allinonegadgetbd.com';
+            if (fs.existsSync(cnameSrc)) {
+              const rawDomain = fs.readFileSync(cnameSrc, 'utf8').trim();
+              if (rawDomain) customDomain = rawDomain;
+              fs.copyFileSync(cnameSrc, path.join(distDir, 'CNAME'));
+            }
+            const siteOrigin = `https://${customDomain}${base === '/' ? '' : base.slice(0, -1)}`;
+            const today = new Date().toISOString().slice(0, 10);
+            const sitemapUrls = [
+              `  <url>\n    <loc>${siteOrigin}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>`,
+              ...seed.categories.map(
+                (c) =>
+                  `  <url>\n    <loc>${siteOrigin}/?category=${encodeURIComponent(c.slug)}</loc>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+              ),
+              ...seed.products
+                .filter((p) => p.active)
+                .map(
+                  (p) =>
+                    `  <url>\n    <loc>${siteOrigin}/product/${encodeURIComponent(p.slug)}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.9</priority>\n  </url>`
+                ),
+            ];
+            fs.writeFileSync(
+              path.join(distDir, 'sitemap.xml'),
+              `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapUrls.join('\n')}\n</urlset>\n`,
+              'utf8'
+            );
+            fs.writeFileSync(
+              path.join(distDir, 'robots.txt'),
+              `User-agent: *\nAllow: /\nDisallow: /admin\n\nSitemap: ${siteOrigin}/sitemap.xml\n`,
+              'utf8'
+            );
           }
         },
       },

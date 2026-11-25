@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Save, Bell, Download, CheckCircle2 } from 'lucide-react';
 import { storeClient } from '../../utils/storeClient';
 import type { SiteSettings } from '../../types';
@@ -32,6 +32,10 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
+
+  useEffect(() => {
+    setForm(initialSettings);
+  }, [initialSettings]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

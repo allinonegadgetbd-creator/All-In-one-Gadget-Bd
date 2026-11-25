@@ -50,6 +50,7 @@ export interface Order {
   customerName: string;
   customerPhone: string;
   customerAddress: string;
+  division?: string;
   deliveryZone: 'inside_dhaka' | 'outside_dhaka';
   items: OrderItem[];
   subtotal: number;

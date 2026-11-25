@@ -149,7 +149,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 <div className="flex items-start gap-2">
                   <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                   <span>
-                    {order.customerAddress} ({order.deliveryZone === 'inside_dhaka' ? 'Inside Dhaka' : 'Outside Dhaka'})
+                    {order.customerAddress} ({order.division ? `${order.division} · ` : ''}
+                    {order.deliveryZone === 'inside_dhaka' ? 'Inside Dhaka' : 'Outside Dhaka'})
                   </span>
                 </div>
               </div>

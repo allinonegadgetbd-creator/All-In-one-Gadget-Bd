@@ -17,6 +17,7 @@ export function buildWhatsAppOrderUrl(order: Order, whatsappNumber: string): str
     `------------------------`,
     `*Customer:* ${order.customerName}`,
     `*Phone:* ${order.customerPhone}`,
+    order.division ? `*Division:* ${order.division}` : null,
     `*Address:* ${order.customerAddress}`,
     `*Zone:* ${zoneLabel}`,
     `------------------------`,

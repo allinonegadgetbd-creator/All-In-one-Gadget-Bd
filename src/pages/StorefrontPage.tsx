@@ -5,7 +5,6 @@ import { HeroBannerSlider } from '../components/storefront/HeroBannerSlider';
 import { ProductCatalog } from '../components/storefront/ProductCatalog';
 import { CheckoutDrawer } from '../components/storefront/CheckoutDrawer';
 import { ReviewsSection } from '../components/storefront/ReviewsSection';
-import { TrackOrderModal } from '../components/storefront/TrackOrderModal';
 import { PromoPopupModal } from '../components/storefront/PromoPopupModal';
 import { Footer } from '../components/storefront/Footer';
 import { storeClient } from '../utils/storeClient';
@@ -14,6 +13,8 @@ import type { CartItem, Product, ProductVariation, StorefrontData } from '../typ
 
 interface StorefrontPageProps {
   cart: CartItem[];
+  popupDismissed: boolean;
+  onDismissPopup: () => void;
   onAddToCart: (product: Product, variation?: ProductVariation, qty?: number) => void;
   onUpdateQty: (key: string, delta: number) => void;
   onRemoveItem: (key: string) => void;
@@ -23,6 +24,8 @@ interface StorefrontPageProps {
 
 export const StorefrontPage: React.FC<StorefrontPageProps> = ({
   cart,
+  popupDismissed,
+  onDismissPopup,
   onAddToCart,
   onUpdateQty,
   onRemoveItem,
@@ -33,7 +36,6 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
   const [loading, setLoading] = useState(true);
 
   const [cartOpen, setCartOpen] = useState(false);
-  const [trackOpen, setTrackOpen] = useState(false);
 
   useEffect(() => {
     storeClient
@@ -135,7 +137,6 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
       <Header
         cartCount={totalBagCount}
         onOpenCart={() => setCartOpen(true)}
-        onOpenTrackOrder={() => setTrackOpen(true)}
         onNavigateHome={() => onNavigate('/')}
       />
 
@@ -172,9 +173,11 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
         onClearCart={onClearCart}
       />
 
-      <TrackOrderModal open={trackOpen} onClose={() => setTrackOpen(false)} />
-
-      <PromoPopupModal popup={data.popup} />
+      <PromoPopupModal
+        popup={data.popup}
+        dismissed={popupDismissed}
+        onDismiss={onDismissPopup}
+      />
     </div>
   );
 };

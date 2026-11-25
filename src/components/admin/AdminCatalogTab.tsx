@@ -548,6 +548,12 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
                 </label>
               </div>
 
+              {actionError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
+                  {actionError}
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={saving}

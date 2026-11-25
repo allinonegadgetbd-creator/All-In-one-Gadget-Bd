@@ -75,6 +75,8 @@ export default function App() {
     setCart((prev) => prev.filter((i) => i.key !== key));
   };
 
+  const [popupDismissed, setPopupDismissed] = useState(false);
+
   const clearCart = () => setCart([]);
 
   if (pathname.startsWith('/admin')) {
@@ -101,6 +103,8 @@ export default function App() {
   return (
     <StorefrontPage
       cart={cart}
+      popupDismissed={popupDismissed}
+      onDismissPopup={() => setPopupDismissed(true)}
       onAddToCart={addItemToCart}
       onUpdateQty={handleUpdateQty}
       onRemoveItem={handleRemoveItem}

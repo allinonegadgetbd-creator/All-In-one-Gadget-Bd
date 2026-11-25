@@ -5,6 +5,8 @@ import type { PopupConfig, PopupThemeKey } from '../../types';
 
 interface PromoPopupModalProps {
   popup: PopupConfig;
+  dismissed: boolean;
+  onDismiss: () => void;
 }
 
 const POPUP_THEMES: Record<
@@ -43,26 +45,37 @@ const POPUP_THEMES: Record<
   },
 };
 
-export const PromoPopupModal: React.FC<PromoPopupModalProps> = ({ popup }) => {
+export const PromoPopupModal: React.FC<PromoPopupModalProps> = ({
+  popup,
+  dismissed,
+  onDismiss,
+}) => {
   const [visible, setVisible] = useState(false);
 
-  useEffect(() => {
-    if (!popup.enabled) return;
-    if (sessionStorage.getItem('aiog_popup_dismissed') === '1') return;
+  const hasValidContent =
+    popup.mode === 'banner'
+      ? Boolean(popup.bannerImage && popup.bannerImage.trim())
+      : Boolean((popup.title && popup.title.trim()) || (popup.subtitle && popup.subtitle.trim()));
 
-    const delayMs = Math.max(0, (popup.delaySeconds ?? 4) * 1000);
+  useEffect(() => {
+    if (!popup.enabled || dismissed || !hasValidContent) {
+      setVisible(false);
+      return;
+    }
+
+    const delayMs = Math.max(0, (popup.delaySeconds ?? 2) * 1000);
     const timer = setTimeout(() => {
       setVisible(true);
     }, delayMs);
 
     return () => clearTimeout(timer);
-  }, [popup.enabled, popup.delaySeconds]);
+  }, [popup.enabled, popup.delaySeconds, dismissed, hasValidContent]);
 
-  if (!visible || !popup.enabled) return null;
+  if (!visible || !popup.enabled || dismissed || !hasValidContent) return null;
 
-  const dismiss = () => {
-    sessionStorage.setItem('aiog_popup_dismissed', '1');
+  const closeOnceForVisit = () => {
     setVisible(false);
+    onDismiss();
   };
 
   const theme = POPUP_THEMES[popup.textTheme] || POPUP_THEMES['midnight-gold'];
@@ -70,7 +83,7 @@ export const PromoPopupModal: React.FC<PromoPopupModalProps> = ({ popup }) => {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4"
-      onClick={dismiss}
+      onClick={closeOnceForVisit}
     >
       <div
         className="relative w-full max-w-md rounded-2xl overflow-hidden shadow-2xl"
@@ -78,9 +91,9 @@ export const PromoPopupModal: React.FC<PromoPopupModalProps> = ({ popup }) => {
       >
         <button
           type="button"
-          onClick={dismiss}
+          onClick={closeOnceForVisit}
           aria-label="Close offer popup"
-          className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/40 text-white hover:bg-black/60 flex items-center justify-center cursor-pointer"
+          className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/45 text-white hover:bg-black/65 flex items-center justify-center cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
@@ -88,7 +101,7 @@ export const PromoPopupModal: React.FC<PromoPopupModalProps> = ({ popup }) => {
         {popup.mode === 'banner' ? (
           <a
             href={popup.bannerLink || '#products'}
-            onClick={dismiss}
+            onClick={closeOnceForVisit}
             className="block bg-white"
           >
             <img
@@ -103,12 +116,16 @@ export const PromoPopupModal: React.FC<PromoPopupModalProps> = ({ popup }) => {
             <div className={`text-xs font-semibold tracking-wider uppercase ${theme.accent}`}>
               Exclusive Offer
             </div>
-            <h3 className="mt-2 font-display text-2xl font-bold leading-snug text-balance">
-              {popup.title}
-            </h3>
-            <p className="mt-3 text-sm opacity-90 leading-relaxed">
-              {popup.subtitle}
-            </p>
+            {popup.title && (
+              <h3 className="mt-2 font-display text-2xl font-bold leading-snug text-balance">
+                {popup.title}
+              </h3>
+            )}
+            {popup.subtitle && (
+              <p className="mt-3 text-sm opacity-90 leading-relaxed">
+                {popup.subtitle}
+              </p>
+            )}
 
             {popup.highlightCode && (
               <div className={`mt-5 inline-block px-5 py-2.5 rounded-xl font-mono text-base font-bold tracking-widest ${theme.codeBox}`}>
@@ -119,7 +136,7 @@ export const PromoPopupModal: React.FC<PromoPopupModalProps> = ({ popup }) => {
             <div className="mt-6">
               <a
                 href={popup.ctaLink || '#products'}
-                onClick={dismiss}
+                onClick={closeOnceForVisit}
                 className={`w-full h-12 rounded-xl font-semibold text-sm inline-flex items-center justify-center gap-2 transition-colors ${theme.cta}`}
               >
                 {popup.ctaText || 'Shop Deals Now'}
