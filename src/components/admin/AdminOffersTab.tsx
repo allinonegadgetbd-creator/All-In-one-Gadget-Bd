@@ -24,34 +24,55 @@ export const AdminOffersTab: React.FC<AdminOffersTabProps> = ({
   const [tierMinSpend, setTierMinSpend] = useState('2000');
   const [tierType, setTierType] = useState<'percent' | 'fixed'>('fixed');
   const [tierValue, setTierValue] = useState('150');
+  const [actionError, setActionError] = useState('');
 
   const handleAddCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim()) return;
-    await storeClient.addCoupon(token, {
-      code: code.trim().toUpperCase(),
-      type,
-      value: Number(value) || 0,
-      minSpend: Number(minSpend) || 0,
-      active: true,
-    });
-    setCode('');
-    await onRefresh();
+    setActionError('');
+    try {
+      await storeClient.addCoupon(token, {
+        code: code.trim().toUpperCase(),
+        type,
+        value: Number(value) || 0,
+        minSpend: Number(minSpend) || 0,
+        active: true,
+      });
+      setCode('');
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to create coupon.');
+    }
   };
 
   const handleToggleCoupon = async (coupon: Coupon) => {
-    await storeClient.toggleCoupon(token, coupon);
-    await onRefresh();
+    setActionError('');
+    try {
+      await storeClient.toggleCoupon(token, coupon);
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to update coupon.');
+    }
   };
 
   const handleDeleteCoupon = async (id: string) => {
-    await storeClient.deleteCoupon(token, id);
-    await onRefresh();
+    setActionError('');
+    try {
+      await storeClient.deleteCoupon(token, id);
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to delete coupon.');
+    }
   };
 
   const saveTiers = async (tiers: DiscountTier[]) => {
-    await storeClient.saveSettings(token, { discountTiers: tiers });
-    await onRefresh();
+    setActionError('');
+    try {
+      await storeClient.saveSettings(token, { discountTiers: tiers });
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to update discount tiers.');
+    }
   };
 
   const handleAddTier = async (e: React.FormEvent) => {
@@ -76,6 +97,11 @@ export const AdminOffersTab: React.FC<AdminOffersTabProps> = ({
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
+          {actionError}
+        </div>
+      )}
       {/* Automatic Shopping Spend Tiers */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
         <div className="flex items-center gap-2">

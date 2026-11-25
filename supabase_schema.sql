@@ -1,5 +1,5 @@
--- Run this SQL in your Supabase SQL Editor (Project: nrwelgnjmkomdginctex)
--- Creates persistent tables, RLS policies, and safe order tracking RPC
+-- Run this SQL once in your Supabase SQL Editor (Project: nrwelgnjmkomdginctex)
+-- Creates persistent tables, strict RLS policies, and safe order tracking RPC
 
 create table if not exists public.store_state (
   id text primary key default 'default',
@@ -38,21 +38,28 @@ drop policy if exists "Public read store_state" on public.store_state;
 create policy "Public read store_state"
   on public.store_state for select
   to anon, authenticated
-  using (true);
+  using (id = 'default');
 
 drop policy if exists "Admin write store_state" on public.store_state;
 create policy "Admin write store_state"
   on public.store_state for all
   to authenticated
   using (true)
-  with check (true);
+  with check (id = 'default');
 
--- Anyone can place an order; only authenticated admins can list/update/delete orders
+-- Customers can only submit validated Pending orders; only authenticated admins can read/update/delete orders
 drop policy if exists "Public insert orders" on public.orders;
 create policy "Public insert orders"
   on public.orders for insert
   to anon, authenticated
-  with check (true);
+  with check (
+    status = 'Pending'
+    and subtotal >= 0
+    and total >= 0
+    and length(trim(customer_name)) >= 2
+    and length(trim(customer_phone)) >= 10
+    and length(trim(customer_address)) >= 5
+  );
 
 drop policy if exists "Admin manage orders" on public.orders;
 create policy "Admin manage orders"
@@ -61,7 +68,7 @@ create policy "Admin manage orders"
   using (true)
   with check (true);
 
--- Safe public order tracking RPC (matches order_number + last 4 phone digits only)
+-- Safe public order tracking RPC (matches exact order_number + last 4 phone digits only)
 create or replace function public.track_order_public(p_order_number text, p_phone_last4 text)
 returns table (
   order_number text,
@@ -88,3 +95,15 @@ as $$
     and right(regexp_replace(o.customer_phone, '\D', '', 'g'), 4) = right(regexp_replace(p_phone_last4, '\D', '', 'g'), 4)
   limit 1;
 $$;
+
+grant execute on function public.track_order_public(text, text) to anon, authenticated;
+
+-- Enable live order notifications in Supabase Realtime safely
+do $$
+begin
+  alter publication supabase_realtime add table public.orders;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end $$;
+

@@ -31,6 +31,7 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
   const [savingBanners, setSavingBanners] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [saveError, setSaveError] = useState('');
 
   const uploadFile = async (file: File): Promise<string | null> => {
     setUploading(true);
@@ -45,10 +46,13 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
     e.preventDefault();
     setSavingPopup(true);
     setSavedMsg('');
+    setSaveError('');
     try {
       await storeClient.savePopup(token, popup);
       await onRefresh();
       setSavedMsg('Popup settings saved!');
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save popup.');
     } finally {
       setSavingPopup(false);
     }
@@ -57,9 +61,12 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
   const handleSaveBanners = async (nextBanners: HeroBanner[]) => {
     setBanners(nextBanners);
     setSavingBanners(true);
+    setSaveError('');
     try {
       await storeClient.saveBanners(token, nextBanners);
       await onRefresh();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to update banners.');
     } finally {
       setSavingBanners(false);
     }
@@ -67,6 +74,11 @@ export const AdminPopupBannersTab: React.FC<AdminPopupBannersTabProps> = ({
 
   return (
     <div className="space-y-6">
+      {saveError && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
+          {saveError}
+        </div>
+      )}
       {/* Website Entry Popup Config */}
       <form onSubmit={handleSavePopup} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
         <div className="flex items-center justify-between">

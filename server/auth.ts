@@ -6,18 +6,39 @@ import type { AdminCredential } from './types.ts';
 const SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
+// Public client-safe Supabase defaults (no secret keys in code)
+const DEFAULT_PUBLIC_SUPABASE_URL = 'https://nrwelgnjmkomdginctex.supabase.co';
+const DEFAULT_PUBLIC_SUPABASE_KEY = 'sb_publishable_P_CQ5U1MtMt7_o2U26vw1w_ha2Mdk1J';
+
+export function getPublicSupabaseConfig(): { url: string; key: string } {
+  const url = (process.env.SUPABASE_URL || DEFAULT_PUBLIC_SUPABASE_URL).trim();
+  const key = (
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    DEFAULT_PUBLIC_SUPABASE_KEY
+  ).trim();
+  return { url, key };
+}
+
 export function isSupabaseAuthEnabled(): boolean {
-  const url = (process.env.SUPABASE_URL || '').trim();
-  const key = (process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SECRET_KEY || '').trim();
+  const { url, key } = getPublicSupabaseConfig();
   return Boolean(url && key);
+}
+
+// In-memory store mapping admin session nonce -> Supabase user access JWT for RLS writes
+const adminSupabaseJwtMap = new Map<string, string>();
+
+export function getSessionSupabaseJwt(req: Request): string | undefined {
+  const token = extractBearerToken(req);
+  if (!token) return undefined;
+  return adminSupabaseJwtMap.get(token);
 }
 
 export async function verifySupabaseUserLogin(
   email: string,
   password: string
-): Promise<{ ok: boolean; email?: string; error?: string }> {
-  const url = (process.env.SUPABASE_URL || '').trim();
-  const key = (process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SECRET_KEY || '').trim();
+): Promise<{ ok: boolean; email?: string; supabaseJwt?: string; error?: string }> {
+  const { url, key } = getPublicSupabaseConfig();
   if (!url || !key) {
     return { ok: false, error: 'Supabase Auth is not configured.' };
   }
@@ -47,7 +68,11 @@ export async function verifySupabaseUserLogin(
     }
   }
 
-  return { ok: true, email: data.user.email || email };
+  return {
+    ok: true,
+    email: data.user.email || email,
+    supabaseJwt: data.session?.access_token,
+  };
 }
 
 export function hashPasscode(passcode: string, existingSalt?: string): { salt: string; hash: string } {
@@ -79,7 +104,7 @@ export function needsFirstRunSetup(credential: AdminCredential | null): boolean 
   return credential === null;
 }
 
-export function createAdminToken(email?: string): string {
+export function createAdminToken(email?: string, supabaseJwt?: string): string {
   const payload = Buffer.from(
     JSON.stringify({
       role: 'admin',
@@ -89,7 +114,11 @@ export function createAdminToken(email?: string): string {
     })
   ).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
-  return `${payload}.${sig}`;
+  const token = `${payload}.${sig}`;
+  if (supabaseJwt) {
+    adminSupabaseJwtMap.set(token, supabaseJwt);
+  }
+  return token;
 }
 
 export function verifyAdminToken(token: string | undefined): boolean {
@@ -102,24 +131,34 @@ export function verifyAdminToken(token: string | undefined): boolean {
   const b = Buffer.from(expectedSig);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
   try {
-    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { role?: string; exp?: number };
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      role?: string;
+      exp?: number;
+    };
     if (decoded.role !== 'admin') return false;
-    if (!decoded.exp || Date.now() > decoded.exp) return false;
+    if (!decoded.exp || Date.now() > decoded.exp) {
+      adminSupabaseJwtMap.delete(token);
+      return false;
+    }
     return true;
   } catch {
     return false;
   }
 }
 
-export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+function extractBearerToken(req: Request): string {
   const authHeader = req.headers.authorization;
-  let token = '';
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.slice(7).trim();
-  } else if (typeof req.query.token === 'string') {
-    token = req.query.token.trim();
+    return authHeader.slice(7).trim();
   }
+  if (typeof req.query.token === 'string') {
+    return req.query.token.trim();
+  }
+  return '';
+}
 
+export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+  const token = extractBearerToken(req);
   if (!verifyAdminToken(token)) {
     res.status(401).json({ error: 'Unauthorized. Please sign in to the Admin App.' });
     return;

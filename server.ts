@@ -11,7 +11,10 @@ import {
   initStore,
   getStoreSync,
   persistStore,
-  syncOrderToSupabase,
+  insertPublicOrderToSupabase,
+  updateOrderStatusInSupabase,
+  deleteOrderFromSupabase,
+  refreshOrdersFromSupabase,
   calculateOrderTotals,
   isSupabaseConfigured,
 } from './server/store.ts';
@@ -20,6 +23,7 @@ import {
   verifyPasscode,
   needsFirstRunSetup,
   createAdminToken,
+  getSessionSupabaseJwt,
   requireAdmin,
   isSupabaseAuthEnabled,
   verifySupabaseUserLogin,
@@ -352,7 +356,7 @@ async function startServer() {
 
     db.orders.unshift(order);
     await persistStore(db);
-    await syncOrderToSupabase(order);
+    await insertPublicOrderToSupabase(order);
     broadcastOrderEvent(order);
 
     res.status(201).json({ order });
@@ -439,7 +443,8 @@ async function startServer() {
         res.status(401).json({ error: result.error || 'Invalid credentials.' });
         return;
       }
-      const token = createAdminToken(result.email);
+      const token = createAdminToken(result.email, result.supabaseJwt);
+      await refreshOrdersFromSupabase(result.supabaseJwt);
       res.json({ token, email: result.email });
       return;
     }
@@ -461,7 +466,8 @@ async function startServer() {
   // =========================
   // Protected Admin APIs
   // =========================
-  app.get('/api/admin/bootstrap', requireAdmin, (_req, res) => {
+  app.get('/api/admin/bootstrap', requireAdmin, async (req, res) => {
+    await refreshOrdersFromSupabase(getSessionSupabaseJwt(req));
     const db = getStoreSync();
     res.json({
       categories: [...db.categories].sort((a, b) => a.order - b.order),
@@ -516,15 +522,18 @@ async function startServer() {
       return;
     }
     order.status = status;
-    await persistStore(db);
-    await syncOrderToSupabase(order);
+    const sbJwt = getSessionSupabaseJwt(req);
+    await persistStore(db, sbJwt);
+    await updateOrderStatusInSupabase(order.id, status, sbJwt);
     res.json({ order });
   });
 
   app.delete('/api/admin/orders/:id', requireAdmin, async (req, res) => {
     const db = getStoreSync();
+    const sbJwt = getSessionSupabaseJwt(req);
     db.orders = db.orders.filter((o) => o.id !== req.params.id);
-    await persistStore(db);
+    await persistStore(db, sbJwt);
+    await deleteOrderFromSupabase(String(req.params.id), sbJwt);
     res.json({ ok: true });
   });
 
@@ -557,7 +566,7 @@ async function startServer() {
       createdAt: new Date().toISOString(),
     };
     db.products.unshift(product);
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.status(201).json({ product });
   });
 
@@ -587,14 +596,14 @@ async function startServer() {
       variations: Array.isArray(body.variations) ? body.variations : current.variations,
     };
     db.products[idx] = updated;
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.json({ product: updated });
   });
 
   app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
     const db = getStoreSync();
     db.products = db.products.filter((p) => p.id !== req.params.id);
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.json({ ok: true });
   });
 
@@ -613,7 +622,7 @@ async function startServer() {
       order: db.categories.length + 1,
     };
     db.categories.push(category);
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.status(201).json({ category });
   });
 
@@ -632,14 +641,14 @@ async function startServer() {
         if (p.categoryId === cat.id) p.categoryName = name;
       });
     }
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.json({ category: cat });
   });
 
   app.delete('/api/admin/categories/:id', requireAdmin, async (req, res) => {
     const db = getStoreSync();
     db.categories = db.categories.filter((c) => c.id !== req.params.id);
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.json({ ok: true });
   });
 
@@ -660,7 +669,7 @@ async function startServer() {
       active: req.body?.active !== false,
     };
     db.coupons.unshift(coupon);
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.status(201).json({ coupon });
   });
 
@@ -676,14 +685,14 @@ async function startServer() {
     if (req.body?.value !== undefined) coupon.value = Math.max(1, Number(req.body.value));
     if (req.body?.minSpend !== undefined) coupon.minSpend = Math.max(0, Number(req.body.minSpend));
     if (req.body?.active !== undefined) coupon.active = Boolean(req.body.active);
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.json({ coupon });
   });
 
   app.delete('/api/admin/coupons/:id', requireAdmin, async (req, res) => {
     const db = getStoreSync();
     db.coupons = db.coupons.filter((c) => c.id !== req.params.id);
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.json({ ok: true });
   });
 
@@ -702,7 +711,7 @@ async function startServer() {
         ? incoming.discountTiers
         : db.settings.discountTiers,
     };
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.json({ settings: db.settings });
   });
 
@@ -712,7 +721,7 @@ async function startServer() {
       ...db.popup,
       ...(req.body || {}),
     };
-    await persistStore(db);
+    await persistStore(db, getSessionSupabaseJwt(req));
     res.json({ popup: db.popup });
   });
 
@@ -720,7 +729,7 @@ async function startServer() {
     const db = getStoreSync();
     if (Array.isArray(req.body?.banners)) {
       db.banners = req.body.banners;
-      await persistStore(db);
+      await persistStore(db, getSessionSupabaseJwt(req));
     }
     res.json({ banners: db.banners });
   });

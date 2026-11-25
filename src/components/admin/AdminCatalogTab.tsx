@@ -37,6 +37,7 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
   const [variations, setVariations] = useState<ProductVariation[]>([]);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   // Category states
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -86,6 +87,7 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setActionError('');
     try {
       const payload = {
         name,
@@ -103,14 +105,21 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
       await storeClient.saveProduct(token, isNewProduct, editingProduct?.id, payload);
       setEditingProduct(null);
       await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to save product.');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeleteProduct = async (id: string) => {
-    await storeClient.deleteProduct(token, id);
-    await onRefresh();
+    setActionError('');
+    try {
+      await storeClient.deleteProduct(token, id);
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to delete product.');
+    }
   };
 
   const handleAddVariation = () => {
@@ -129,14 +138,24 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
   const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
-    await storeClient.addCategory(token, newCategoryName.trim());
-    setNewCategoryName('');
-    await onRefresh();
+    setActionError('');
+    try {
+      await storeClient.addCategory(token, newCategoryName.trim());
+      setNewCategoryName('');
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to create category.');
+    }
   };
 
   const handleDeleteCategory = async (id: string) => {
-    await storeClient.deleteCategory(token, id);
-    await onRefresh();
+    setActionError('');
+    try {
+      await storeClient.deleteCategory(token, id);
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to delete category.');
+    }
   };
 
   const filteredProducts = products.filter(
@@ -147,6 +166,11 @@ export const AdminCatalogTab: React.FC<AdminCatalogTabProps> = ({
 
   return (
     <div className="space-y-4">
+      {actionError && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
+          {actionError}
+        </div>
+      )}
       {/* Sub-navigation */}
       <div className="grid grid-cols-2 gap-2 p-1 bg-slate-200/70 rounded-xl">
         <button

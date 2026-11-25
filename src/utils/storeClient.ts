@@ -38,16 +38,30 @@ interface StorePayload {
 const LOCAL_STORE_KEY = 'aiog_static_store_v1';
 const LOCAL_ORDERS_KEY = 'aiog_static_orders_v1';
 
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-const SUPABASE_PUB_KEY = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
-const CLOUDINARY_CLOUD = (import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || '').trim();
+// Public client-safe configuration (private secret keys NEVER live in client code)
+const DEFAULT_PUBLIC_SUPABASE_URL = 'https://nrwelgnjmkomdginctex.supabase.co';
+const DEFAULT_PUBLIC_SUPABASE_KEY = 'sb_publishable_P_CQ5U1MtMt7_o2U26vw1w_ha2Mdk1J';
+const DEFAULT_PUBLIC_CLOUDINARY_CLOUD = 'cf2cihes';
+
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || DEFAULT_PUBLIC_SUPABASE_URL).trim();
+const SUPABASE_PUB_KEY = (
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || DEFAULT_PUBLIC_SUPABASE_KEY
+).trim();
+const CLOUDINARY_CLOUD = (
+  import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || DEFAULT_PUBLIC_CLOUDINARY_CLOUD
+).trim();
 const CLOUDINARY_PRESET = (import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || '').trim();
 
 let sbClient: SupabaseClient | null = null;
 function getBrowserSupabase(): SupabaseClient | null {
   if (!SUPABASE_URL || !SUPABASE_PUB_KEY) return null;
   if (!sbClient) {
-    sbClient = createClient(SUPABASE_URL, SUPABASE_PUB_KEY);
+    sbClient = createClient(SUPABASE_URL, SUPABASE_PUB_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    });
   }
   return sbClient;
 }
@@ -74,6 +88,44 @@ function slugify(text: string): string {
     .replace(/(^-|-$)/g, '');
 }
 
+async function compressImageDataUrl(file: File, maxDim = 1000, quality = 0.82): Promise<string> {
+  return await new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!rawUrl) {
+        resolve('');
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(rawUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          const compressed = canvas.toDataURL('image/webp', quality);
+          resolve(compressed.length < rawUrl.length ? compressed : rawUrl);
+        } catch {
+          resolve(rawUrl);
+        }
+      };
+      img.onerror = () => resolve(rawUrl);
+      img.src = rawUrl;
+    };
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(file);
+  });
+}
+
 async function loadSeedJson(): Promise<StorePayload> {
   const res = await fetch(assetUrl('/store-seed.json'));
   if (!res.ok) throw new Error('Failed to load store catalog');
@@ -90,7 +142,13 @@ async function loadStaticStore(): Promise<StorePayload> {
         .eq('id', 'default')
         .maybeSingle();
       if (!error && data?.payload) {
-        return data.payload as StorePayload;
+        const payload = data.payload as StorePayload;
+        try {
+          localStorage.setItem(LOCAL_STORE_KEY, JSON.stringify(payload));
+        } catch {
+          // ignore
+        }
+        return payload;
       }
     } catch {
       // Fallback cleanly to local/seed
@@ -116,18 +174,43 @@ async function loadStaticStore(): Promise<StorePayload> {
 }
 
 async function saveStaticStore(next: StorePayload): Promise<void> {
+  const sanitized = {
+    ...next,
+    orders: [],
+    adminCredential: null,
+  };
+  const sb = getBrowserSupabase();
+  if (sb) {
+    const { data: sessionData } = await sb.auth.getSession();
+    if (!sessionData.session) {
+      throw new Error('Your admin session expired. Please sign in again.');
+    }
+    const { error } = await sb.from('store_state').upsert({
+      id: 'default',
+      payload: sanitized,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) {
+      throw new Error(error.message || 'Could not save to database.');
+    }
+  }
   try {
-    localStorage.setItem(LOCAL_STORE_KEY, JSON.stringify(next));
+    localStorage.setItem(LOCAL_STORE_KEY, JSON.stringify(sanitized));
   } catch {
     // ignore
   }
-  const sb = getBrowserSupabase();
-  if (sb) {
-    await sb.from('store_state').upsert({
-      id: 'default',
-      payload: next,
-      updated_at: new Date().toISOString(),
-    });
+}
+
+async function assertOkResponse(res: Response, fallbackMsg: string): Promise<void> {
+  if (!res.ok) {
+    let msg = fallbackMsg;
+    try {
+      const json = (await res.json()) as { error?: string };
+      if (json.error) msg = json.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(msg);
   }
 }
 
@@ -316,10 +399,10 @@ export const storeClient = {
     const calc = computeOrderTotals(db, payload.items, payload.deliveryZone, payload.couponCode);
     if (calc.items.length === 0) return { ok: false, error: 'Your cart is empty.' };
 
-    const randomSeq = 1100 + Math.floor(Math.random() * 8800);
+    const uniqueSeq = `${Date.now().toString().slice(-5)}${Math.floor(Math.random() * 10)}`;
     const order: Order = {
       id: `ord-${crypto.randomUUID().slice(0, 8)}`,
-      orderNumber: `AIOG-${randomSeq}`,
+      orderNumber: `AIOG-${uniqueSeq}`,
       customerName: name,
       customerPhone: phone,
       customerAddress: addr,
@@ -338,7 +421,7 @@ export const storeClient = {
 
     const sb = getBrowserSupabase();
     if (sb) {
-      await sb.from('orders').insert({
+      const { error } = await sb.from('orders').insert({
         id: order.id,
         order_number: order.orderNumber,
         customer_name: order.customerName,
@@ -356,6 +439,9 @@ export const storeClient = {
         notes: order.notes || null,
         created_at: order.createdAt,
       });
+      if (error && error.code === '42501') {
+        return { ok: false, error: 'Please check your name, mobile number, and address.' };
+      }
     }
 
     try {
@@ -486,10 +572,7 @@ export const storeClient = {
 
     const sb = getBrowserSupabase();
     if (!sb) {
-      return {
-        ok: false,
-        error: 'Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in GitHub Repo Settings → Variables/Secrets to enable Supabase login.',
-      };
+      return { ok: false, error: 'Authentication service is unavailable.' };
     }
 
     const { data, error } = await sb.auth.signInWithPassword({
@@ -516,9 +599,14 @@ export const storeClient = {
       return (await res.json()) as AdminBootstrapData;
     }
 
+    const sb = getBrowserSupabase();
+    if (sb) {
+      const { data: sessionData } = await sb.auth.getSession();
+      if (!sessionData.session) return null;
+    }
+
     const db = await loadStaticStore();
     let orders: Order[] = db.orders || [];
-    const sb = getBrowserSupabase();
     if (sb) {
       const { data: rows, error } = await sb
         .from('orders')
@@ -614,30 +702,34 @@ export const storeClient = {
 
   async updateOrderStatus(token: string, orderId: string, status: OrderStatus): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch(`/api/admin/orders/${orderId}`, {
+      const res = await fetch(`/api/admin/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status }),
       });
+      await assertOkResponse(res, 'Failed to update order status.');
       return;
     }
     const sb = getBrowserSupabase();
     if (sb) {
-      await sb.from('orders').update({ status }).eq('id', orderId);
+      const { error } = await sb.from('orders').update({ status }).eq('id', orderId);
+      if (error) throw new Error(error.message || 'Failed to update order status.');
     }
   },
 
   async deleteOrder(token: string, orderId: string): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch(`/api/admin/orders/${orderId}`, {
+      const res = await fetch(`/api/admin/orders/${orderId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
+      await assertOkResponse(res, 'Failed to delete order.');
       return;
     }
     const sb = getBrowserSupabase();
     if (sb) {
-      await sb.from('orders').delete().eq('id', orderId);
+      const { error } = await sb.from('orders').delete().eq('id', orderId);
+      if (error) throw new Error(error.message || 'Failed to delete order.');
     }
   },
 
@@ -649,11 +741,12 @@ export const storeClient = {
   ): Promise<void> {
     if (await isBackendAvailable()) {
       const url = isNew ? '/api/admin/products' : `/api/admin/products/${editingId}`;
-      await fetch(url, {
+      const res = await fetch(url, {
         method: isNew ? 'POST' : 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
+      await assertOkResponse(res, 'Failed to save product.');
       return;
     }
     const db = await loadStaticStore();
@@ -695,10 +788,11 @@ export const storeClient = {
 
   async deleteProduct(token: string, id: string): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch(`/api/admin/products/${id}`, {
+      const res = await fetch(`/api/admin/products/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
+      await assertOkResponse(res, 'Failed to delete product.');
       return;
     }
     const db = await loadStaticStore();
@@ -708,11 +802,12 @@ export const storeClient = {
 
   async addCategory(token: string, name: string): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch('/api/admin/categories', {
+      const res = await fetch('/api/admin/categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name }),
       });
+      await assertOkResponse(res, 'Failed to create category.');
       return;
     }
     const db = await loadStaticStore();
@@ -727,10 +822,11 @@ export const storeClient = {
 
   async deleteCategory(token: string, id: string): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch(`/api/admin/categories/${id}`, {
+      const res = await fetch(`/api/admin/categories/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
+      await assertOkResponse(res, 'Failed to delete category.');
       return;
     }
     const db = await loadStaticStore();
@@ -740,11 +836,12 @@ export const storeClient = {
 
   async addCoupon(token: string, coupon: Omit<Coupon, 'id'>): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch('/api/admin/coupons', {
+      const res = await fetch('/api/admin/coupons', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(coupon),
       });
+      await assertOkResponse(res, 'Failed to add coupon.');
       return;
     }
     const db = await loadStaticStore();
@@ -754,11 +851,12 @@ export const storeClient = {
 
   async toggleCoupon(token: string, coupon: Coupon): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch(`/api/admin/coupons/${coupon.id}`, {
+      const res = await fetch(`/api/admin/coupons/${coupon.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ active: !coupon.active }),
       });
+      await assertOkResponse(res, 'Failed to update coupon.');
       return;
     }
     const db = await loadStaticStore();
@@ -768,10 +866,11 @@ export const storeClient = {
 
   async deleteCoupon(token: string, id: string): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch(`/api/admin/coupons/${id}`, {
+      const res = await fetch(`/api/admin/coupons/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
+      await assertOkResponse(res, 'Failed to delete coupon.');
       return;
     }
     const db = await loadStaticStore();
@@ -781,11 +880,12 @@ export const storeClient = {
 
   async saveSettings(token: string, partial: Partial<SiteSettings>): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch('/api/admin/settings', {
+      const res = await fetch('/api/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(partial),
       });
+      await assertOkResponse(res, 'Failed to save settings.');
       return;
     }
     const db = await loadStaticStore();
@@ -805,11 +905,12 @@ export const storeClient = {
 
   async savePopup(token: string, popup: PopupConfig): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch('/api/admin/popup', {
+      const res = await fetch('/api/admin/popup', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(popup),
       });
+      await assertOkResponse(res, 'Failed to save popup.');
       return;
     }
     const db = await loadStaticStore();
@@ -819,11 +920,12 @@ export const storeClient = {
 
   async saveBanners(token: string, banners: HeroBanner[]): Promise<void> {
     if (await isBackendAvailable()) {
-      await fetch('/api/admin/banners', {
+      const res = await fetch('/api/admin/banners', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ banners }),
       });
+      await assertOkResponse(res, 'Failed to save banners.');
       return;
     }
     const db = await loadStaticStore();
@@ -845,23 +947,21 @@ export const storeClient = {
     }
 
     if (CLOUDINARY_CLOUD && CLOUDINARY_PRESET) {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('upload_preset', CLOUDINARY_PRESET);
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
-        method: 'POST',
-        body: form,
-      });
-      const json = await res.json();
-      if (json.secure_url) return json.secure_url;
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('upload_preset', CLOUDINARY_PRESET);
+        const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
+          method: 'POST',
+          body: form,
+        });
+        const json = await res.json();
+        if (json.secure_url) return json.secure_url;
+      } catch {
+        // fallback cleanly to compressed client image
+      }
     }
 
-    // Compact Data URL fallback when static without upload preset
-    return await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
-    });
+    return await compressImageDataUrl(file);
   },
 };

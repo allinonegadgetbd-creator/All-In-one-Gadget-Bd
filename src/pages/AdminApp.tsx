@@ -79,6 +79,7 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
   const [activeTab, setActiveTab] = useState<AdminTab>('orders');
   const [data, setData] = useState<AdminBootstrap | null>(null);
   const [liveToast, setLiveToast] = useState<string>('');
+  const [actionError, setActionError] = useState<string>('');
   const [showIOSGuide, setShowIOSGuide] = useState(false);
 
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() =>
@@ -220,13 +221,23 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus) => {
-    await storeClient.updateOrderStatus(token, orderId, status);
-    await fetchBootstrap(token);
+    setActionError('');
+    try {
+      await storeClient.updateOrderStatus(token, orderId, status);
+      await fetchBootstrap(token);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to update order status.');
+    }
   };
 
   const handleDeleteOrder = async (orderId: string) => {
-    await storeClient.deleteOrder(token, orderId);
-    await fetchBootstrap(token);
+    setActionError('');
+    try {
+      await storeClient.deleteOrder(token, orderId);
+      await fetchBootstrap(token);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to delete order.');
+    }
   };
 
   const navItems: Array<{ id: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -329,13 +340,6 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
                       ? 'Activate Admin App'
                       : 'Open Admin App'}
               </button>
-
-              {authMode === 'passcode' && (
-                <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-                  Add <code className="font-mono text-slate-600">SUPABASE_URL</code> &{' '}
-                  <code className="font-mono text-slate-600">SUPABASE_PUBLISHABLE_KEY</code> in Secrets to enable Supabase Email login.
-                </p>
-              )}
             </form>
           )}
 
@@ -515,6 +519,15 @@ export const AdminApp: React.FC<{ onNavigateStore: () => void }> = ({ onNavigate
           <div className="mx-4 mt-3 p-3.5 rounded-2xl bg-[#05163B] text-white text-xs font-semibold flex items-center justify-between shadow-lg">
             <span>{liveToast}</span>
             <button type="button" onClick={() => setLiveToast('')} className="p-1">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {actionError && (
+          <div className="mx-4 mt-3 p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center justify-between">
+            <span>{actionError}</span>
+            <button type="button" onClick={() => setActionError('')} className="p-1">
               <X className="w-4 h-4" />
             </button>
           </div>

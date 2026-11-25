@@ -31,16 +31,20 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
   const [form, setForm] = useState<SiteSettings>(initialSettings);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setSaved(false);
+    setSaveError('');
     try {
       await storeClient.saveSettings(token, form);
       await onRefresh();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save settings.');
     } finally {
       setSaving(false);
     }
@@ -251,6 +255,12 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
           </div>
         </div>
       </div>
+
+      {saveError && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
+          {saveError}
+        </div>
+      )}
 
       <button
         type="submit"

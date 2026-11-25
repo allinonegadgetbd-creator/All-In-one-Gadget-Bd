@@ -3,31 +3,90 @@ import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSeedDatabase } from './seed.ts';
-import type { StoreDatabase, Order, OrderItem } from './types.ts';
+import { getPublicSupabaseConfig } from './auth.ts';
+import type { StoreDatabase, Order, OrderItem, OrderStatus } from './types.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), '.data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
 let dbCache: StoreDatabase | null = null;
-let supabaseClient: SupabaseClient | null = null;
+let supabaseServiceClient: SupabaseClient | null = null;
 let supabaseAvailable = false;
 
-function getSupabase(): SupabaseClient | null {
-  if (supabaseClient) return supabaseClient;
-  const url = (process.env.SUPABASE_URL || '').trim();
-  const key = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+function getSupabaseAdminOrUser(userJwt?: string): SupabaseClient | null {
+  const { url, key: pubKey } = getPublicSupabaseConfig();
+  const serviceKey = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+  if (url && serviceKey) {
+    if (!supabaseServiceClient) {
+      supabaseServiceClient = createClient(url, serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
+    return supabaseServiceClient;
+  }
+
+  if (url && pubKey && userJwt) {
+    return createClient(url, pubKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${userJwt}` } },
+    });
+  }
+
+  return null;
+}
+
+function getSupabasePublic(): SupabaseClient | null {
+  const { url, key } = getPublicSupabaseConfig();
   if (!url || !key) return null;
-  supabaseClient = createClient(url, key, {
+  return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  return supabaseClient;
+}
+
+function mapOrderRow(r: any): Order {
+  return {
+    id: r.id,
+    orderNumber: r.order_number,
+    customerName: r.customer_name,
+    customerPhone: r.customer_phone,
+    customerAddress: r.customer_address,
+    deliveryZone: r.delivery_zone,
+    items: r.items || [],
+    subtotal: r.subtotal,
+    tierDiscount: r.tier_discount || 0,
+    couponCode: r.coupon_code || undefined,
+    couponDiscount: r.coupon_discount || 0,
+    deliveryCharge: r.delivery_charge || 0,
+    total: r.total,
+    status: r.status,
+    notes: r.notes || undefined,
+    createdAt: r.created_at,
+  };
+}
+
+export async function refreshOrdersFromSupabase(userJwt?: string): Promise<void> {
+  const sb = getSupabaseAdminOrUser(userJwt);
+  if (!sb || !dbCache) return;
+  try {
+    const { data: orderRows, error } = await sb
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error && Array.isArray(orderRows)) {
+      supabaseAvailable = true;
+      dbCache.orders = orderRows.map(mapOrderRow);
+    }
+  } catch {
+    // Non-fatal
+  }
 }
 
 export async function initStore(): Promise<StoreDatabase> {
   if (dbCache) return dbCache;
 
-  // 1. Try loading from Supabase if configured
-  const sb = getSupabase();
+  // 1. Try loading public store_state & orders from Supabase if available
+  const sb = getSupabaseAdminOrUser() || getSupabasePublic();
   if (sb) {
     try {
       const { data, error } = await sb
@@ -40,29 +99,15 @@ export async function initStore(): Promise<StoreDatabase> {
         supabaseAvailable = true;
         if (data?.payload) {
           const loaded = data.payload as StoreDatabase;
-          const { data: orderRows } = await sb
-            .from('orders')
-            .select('*')
-            .order('created_at', { ascending: false });
-          if (Array.isArray(orderRows) && orderRows.length > 0) {
-            loaded.orders = orderRows.map((r: any) => ({
-              id: r.id,
-              orderNumber: r.order_number,
-              customerName: r.customer_name,
-              customerPhone: r.customer_phone,
-              customerAddress: r.customer_address,
-              deliveryZone: r.delivery_zone,
-              items: r.items || [],
-              subtotal: r.subtotal,
-              tierDiscount: r.tier_discount || 0,
-              couponCode: r.coupon_code || undefined,
-              couponDiscount: r.coupon_discount || 0,
-              deliveryCharge: r.delivery_charge || 0,
-              total: r.total,
-              status: r.status,
-              notes: r.notes || undefined,
-              createdAt: r.created_at,
-            }));
+          const adminSb = getSupabaseAdminOrUser();
+          if (adminSb) {
+            const { data: orderRows } = await adminSb
+              .from('orders')
+              .select('*')
+              .order('created_at', { ascending: false });
+            if (Array.isArray(orderRows)) {
+              loaded.orders = orderRows.map(mapOrderRow);
+            }
           }
           dbCache = loaded;
           return dbCache;
@@ -78,24 +123,7 @@ export async function initStore(): Promise<StoreDatabase> {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf8');
       const parsed = JSON.parse(raw) as StoreDatabase;
-      const v1ToV2: Record<string, string> = {
-        '/src/assets/images/hero_banner_audio_watch_1795593261882.jpg':
-          '/src/assets/images/hero_campaign_audio_watch_v2_1795595150933.jpg',
-        '/src/assets/images/hero_banner_power_charging_1795593262469.jpg':
-          '/src/assets/images/hero_campaign_power_charge_v2_1795595150816.jpg',
-        '/src/assets/images/hero_banner_smart_lifestyle_1795593263595.jpg':
-          '/src/assets/images/hero_campaign_smart_living_v2_1795595151239.jpg',
-      };
-      let changed = false;
-      parsed.banners = (parsed.banners || []).map((b) => {
-        if (v1ToV2[b.image]) {
-          changed = true;
-          return { ...b, image: v1ToV2[b.image] };
-        }
-        return b;
-      });
       dbCache = parsed;
-      if (changed) await persistStore(dbCache);
       return dbCache;
     }
   } catch {
@@ -122,7 +150,7 @@ export function getStoreSync(): StoreDatabase {
   return dbCache;
 }
 
-export async function persistStore(nextDb: StoreDatabase): Promise<void> {
+export async function persistStore(nextDb: StoreDatabase, userJwt?: string): Promise<void> {
   dbCache = nextDb;
 
   try {
@@ -136,7 +164,7 @@ export async function persistStore(nextDb: StoreDatabase): Promise<void> {
     // Non-fatal in read-only containers if Supabase is primary
   }
 
-  const sb = getSupabase();
+  const sb = getSupabaseAdminOrUser(userJwt);
   if (sb) {
     try {
       const publicPayload: StoreDatabase = {
@@ -156,11 +184,11 @@ export async function persistStore(nextDb: StoreDatabase): Promise<void> {
   }
 }
 
-export async function syncOrderToSupabase(order: Order): Promise<void> {
-  const sb = getSupabase();
+export async function insertPublicOrderToSupabase(order: Order): Promise<void> {
+  const sb = getSupabaseAdminOrUser() || getSupabasePublic();
   if (!sb) return;
   try {
-    await sb.from('orders').upsert({
+    await sb.from('orders').insert({
       id: order.id,
       order_number: order.orderNumber,
       customer_name: order.customerName,
@@ -178,6 +206,30 @@ export async function syncOrderToSupabase(order: Order): Promise<void> {
       notes: order.notes || null,
       created_at: order.createdAt,
     });
+  } catch {
+    // Non-fatal
+  }
+}
+
+export async function updateOrderStatusInSupabase(
+  orderId: string,
+  status: OrderStatus,
+  userJwt?: string
+): Promise<void> {
+  const sb = getSupabaseAdminOrUser(userJwt);
+  if (!sb) return;
+  try {
+    await sb.from('orders').update({ status }).eq('id', orderId);
+  } catch {
+    // Non-fatal
+  }
+}
+
+export async function deleteOrderFromSupabase(orderId: string, userJwt?: string): Promise<void> {
+  const sb = getSupabaseAdminOrUser(userJwt);
+  if (!sb) return;
+  try {
+    await sb.from('orders').delete().eq('id', orderId);
   } catch {
     // Non-fatal
   }
@@ -287,5 +339,6 @@ export function calculateOrderTotals(
 }
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean((process.env.SUPABASE_URL || '').trim() && (process.env.SUPABASE_SECRET_KEY || '').trim());
+  const { url, key } = getPublicSupabaseConfig();
+  return Boolean(url && key) || supabaseAvailable;
 }
