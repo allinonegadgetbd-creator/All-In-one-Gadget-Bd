@@ -1,0 +1,6 @@
+{
+  "name": "All In One Gadget",
+  "description": "Budget-friendly electronics, wireless earbuds, smartwatches, power banks, grooming tools, and smart home gadgets in Bangladesh with Cash on Delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
